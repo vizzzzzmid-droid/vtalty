@@ -21,9 +21,10 @@
 - Full plan: `docs/ARCHITECTURE.md` (read it first). Deferred items:
   `docs/ROADMAP.md`. Manual voice test checklist: `docs/MANUAL_TESTS.md`
   (from Phase 4).
-- Current phase: **Phase 3 — DONE (verified locally; integration, e2e +
-  compose smoke need CI/VPS)**. Next: Phase 4 voice/LiveKit (starts only
-  after user says "continue").
+- Current phase: **Phase 4 — DONE (verified locally except Docker/live
+  media; integration, e2e-voice + compose smoke need CI/VPS)**. Next:
+  Phase 5 screen share + noise suppression (starts only after user says
+  "continue").
 - Repo root moved to `vitality/` (clean dir; parent `Default Project` holds
   unrelated files). All paths below are relative to `vitality/`.
 - Local toolchain (this Windows machine): Node 24.19 + pnpm 9.15.0 via
@@ -33,7 +34,8 @@
   helmet 13, rate-limit 11), zod v4, drizzle-orm 0.45 / drizzle-kit 0.31,
   postgres-js 3, pino 10, TS 5.9 (NOT TS 7: typescript-eslint caps at <6.1),
   React 18.3 (spec), Vite 8 + plugin-react 6, Tailwind 4, vitest 5,
-  eslint 10 + typescript-eslint 8, tsx 4, livekit-server v1.13,
+  eslint 10 + typescript-eslint 8, tsx 4, livekit-server-sdk 2.19.1,
+  livekit-client 2.22.3, livekit-server v1.13,
   postgres:16-alpine, caddy:2-alpine.
 
 ## 2. Fixed tech stack (do not substitute without asking)
@@ -105,11 +107,12 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   flags), members, channel_categories, channels (text|voice), messages
   (ULID id), attachments, invites, read_states. First user = owner. Seed:
   `Text/#general` + `Voice/General`.
-- Voice: one LiveKit room per voice channel (`voice-<channelId>` sketch).
-  Token endpoint checks permissions then `AccessToken` + `addGrant` +
-  `toJwt()`. Webhooks (`application/webhook+json`, raw body,
-  `WebhookReceiver.receive`) drive authoritative `voice.state` fan-out.
-  (Phase 4.)
+- Voice (Phase 4 DONE): room = channel id, token endpoint checks
+  permissions then `AccessToken` + mic-only/`canPublishSources` grants +
+  `toJwt()` (TTL 600s). Webhooks (`application/webhook+json`, raw body,
+  `WebhookReceiver.receive`) drive the authoritative in-memory store with
+  startup/periodic reconcile; `voice.state` fan-out fills the snapshot.
+  Client: livekit-client via Caddy `/livekit` path route.
 - Chat (Phase 3 DONE): ULID ids, cursor pagination, soft delete, mentions
   table, read_states + `/unread`, magic-bytes uploads on local volume,
   markdown via react-markdown+remark-gfm with safeUrl allowlist.
@@ -169,7 +172,28 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   Playwright e2e + CI `e2e` job. Migration `0003` (messages, attachments,
   message_mentions, read_states). Verified: typecheck/lint clean,
   58 unit tests green, `pnpm build`, YAML/Caddyfile checks.
-- [ ] Phase 3 — Text chat.
+- [x] Phase 4 — Voice (LiveKit). Server: `POST voice-token` (connect perm,
+  mic-only or listen-only grants, TTL 600s, max 15, rate-limited,
+  one-session eviction), `/webhooks/livekit` (raw-body signature verify,
+  idempotent join/leave/track/room handlers), in-memory voice store +
+  startup/periodic reconcile (membership-gated), `voice.state.update` intent
+  (participants only, 1s throttle, server-mute enforced), moderation
+  (server-mute via `mutePublishedTrack`, disconnect via `removeParticipant`),
+  eviction on kick/leave/channel-delete/role-change/server-delete. Web:
+  livekit-client room manager (adaptiveStream/dynacast, processed-mic
+  processor chain ready for RNNoise, per-user volume, deafen via
+  unsubscribe, PTT, device pickers, mic-test meter, generated UI sounds,
+  reconnect/autoplay banners, human errors, unload cleanup), sidebar
+  participants with speaking ring + volume/moderation menu, user panel with
+  mute/deafen/quality/disconnect, Voice & Audio settings tab. Infra/docs:
+  Caddy `/livekit` path route (client appends `/rtc`, verified in source)
+  + `access_token` scrub, `livekit.yaml` webhook URL + TURN/host-networking
+  notes, `docs/VOICE.md`, `docs/MANUAL_TESTS.md`, `docs/FIRST_RUN.md`.
+  Tests: 8 voice unit + voice/moderation integration (fake LiveKitAdmin,
+  signed webhooks), experimental CI `e2e-voice` (continue-on-error, fake
+  media, 2-user + lurker scenario). Verified locally: typecheck/lint
+  clean, 69 unit tests green, `pnpm build`. Live media, integration, e2e
+  and compose smoke require CI/VPS.
 - [ ] Phase 4 — Voice (LiveKit).
 - [ ] Phase 5 — Screen share + noise suppression.
 - [ ] Phase 6 — Electron polish + e2e + final docs.
@@ -202,3 +226,7 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
 - Unclaimed uploads (chips removed before send) stay orphaned; cleanup cron
   deferred to ROADMAP.
 - Mentions highlight only top-level paragraph text (not inside code/bold).
+- No local Docker/live media on this Windows box: voice integration tests,
+  the `e2e-voice` job and compose smoke run in CI; real two-device audio is
+  covered by `docs/MANUAL_TESTS.md`. The CI `e2e-voice` job is
+  `continue-on-error` (experimental) until it proves green.

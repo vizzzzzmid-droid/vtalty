@@ -1,8 +1,10 @@
 # vitality — self-hosted voice & text for friends
 
-Phase 3: full text chat (ULID history with cursor pagination, sanitized
-markdown, edit/delete, uploads with magic-bytes validation, typing,
-@mentions, unread badges + new-messages divider). Voice arrives in Phase 4.
+Phase 4: working voice channels on self-hosted LiveKit (join/leave,
+sidebar participants with speaking ring, mute/deafen, per-user volume,
+devices, push-to-talk, reconnect, admin moderation). Screen share and
+noise suppression arrive in Phase 5 — see `docs/VOICE.md` for networking
+and `docs/FIRST_RUN.md` for the first-run checklist.
 
 ## Quick start (full stack)
 

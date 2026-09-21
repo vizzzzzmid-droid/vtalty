@@ -167,7 +167,7 @@ flowchart LR
   SVC --> DB[("Postgres<br/>via Drizzle")]
   SVC -- "publish event" --> WSOUT["WS gateway fan-out"]
   SVC -- "mint token / moderate" --> LK["LiveKit<br/>via livekit-server-sdk"]
-  LK -- "webhooks<br/>participant/track events" --> WH["/api/v1/voice/webhook"]
+  LK -- "webhooks<br/>participant/track events" --> WH["/webhooks/livekit"]
   WH --> SVC
 ```
 
@@ -198,7 +198,7 @@ flowchart LR
   `POST /channels/:id/messages`, `PATCH/DELETE /messages/:id`,
   `POST /channels/:id/typing`, `POST /channels/:id/read`.
 - `GET /channels/:id/voice/token` (permission-checked LiveKit mint).
-- `POST /voice/webhook` (raw body, `application/webhook+json`, signature
+- `POST /webhooks/livekit` (raw body, `application/webhook+json`, signature
   verified with `WebhookReceiver`).
 - `POST /uploads` (multipart, MIME + size check), `GET /uploads/:id`.
 - `GET /healthz`, `GET /readyz` (DB + LiveKit reachability).
@@ -336,7 +336,7 @@ Rules:
 
 ### 7.1 Room mapping
 
-One LiveKit room per voice channel: `roomName = "voice-<channelId>"`
+One LiveKit room per voice channel: `roomName = channelId`
 (exact prefix locked in Phase 4). Never expose internal ids beyond what the
 client needs; identity = `user.id`, display name via token `name` claim.
 
@@ -345,25 +345,39 @@ client needs; identity = `user.id`, display name via token `name` claim.
 Backend uses `livekit-server-sdk` v2 `AccessToken`:
 
 - `new AccessToken(apiKey, apiSecret, { identity: userId })`.
-- `addGrant({ roomJoin: true, room: roomName, canPublish, canSubscribe })`
-  derived from permissions (`connect` → join/subscribe; `speak` →
-  canPublish audio; `share_screen` → canPublish video).
-- `await toJwt()` (async in v2). Short TTL (minutes, e.g. 10 min); client
-  refreshes on reconnect/expiry. Default SDK TTL is 6h — we override down.
+- `addGrant({ roomJoin: true, room: roomName })` with `canSubscribe: true`,
+  `canPublishData: false`, and `canPublishSources: [MICROPHONE]` when the
+  role has `speak` (listen-only otherwise: `canPublish: false`). The
+  explicit sources list (not `canPublish`) is the Phase 5 extension point
+  for `screen_share` / `screen_share_audio`.
+- `await toJwt()` (async in v2). TTL 600s; client re-mints per join.
 
 Checks before mint: authenticated, member of server, `connect` permission,
-target channel is voice, server-mute/ban state.
+target channel is voice, room below `VOICE_MAX_PARTICIPANTS` (default 15),
+per-user rate limit. One session per user: minting for channel B evicts the
+user from channel A (store + broadcast + best-effort `removeParticipant`).
 
 ### 7.3 Webhooks (authoritative presence)
 
 LiveKit POSTs `Content-Type: application/webhook+json` to
-`POST /voice/webhook`. Server keeps the RAW body (Fastify raw-body plugin
+`POST /webhooks/livekit`. Server keeps the RAW body (Fastify raw-body plugin
 for that route only) and verifies with
 `new WebhookReceiver(apiKey, apiSecret).receive(rawBody, authHeader)`.
 Subscribed events (minimum): `participant_joined`, `participant_left`,
 `track_published`, `track_unpublished` (+ `room_finished` for cleanup).
+Track events drive the `sharingScreen` flag for screen-share sources only.
 On each webhook: update in-memory voice registry → broadcast `voice.state`
 over WS. Webhook secret and API key/secret come from env only.
+
+State ownership (Phase 4 final): the in-memory voice store mirrors LiveKit
+room membership (webhooks + startup/periodic reconcile). It fills the
+`voice` section of the state snapshot; `server.ready` stays a handshake
+(the client refetches the snapshot on connect). Mic/deafen flags arrive via
+the validated `voice.state.update` WS intent (participants only, 1s
+throttle); server-mute is enforced server-side (client unmute held while
+`serverMuted`). Moderation uses `RoomServiceClient` (`mutePublishedTrack`,
+`removeParticipant`); kick/leave/channel-delete/role-change evict voice
+first (best effort — reconcile is membership-gated so ghosts cannot return).
 
 Client LiveKit events (active speaker, mute) are UX hints; the sidebar list
 is driven by server `voice.state`, not by client gossip.
@@ -489,7 +503,7 @@ keys:
 room:
   auto_create: true
 webhooks:
-  urls: ["http://server:3000/api/v1/voice/webhook"]
+  urls: ["http://server:3000/webhooks/livekit"]
   api_key: <api-key>
 ```
 

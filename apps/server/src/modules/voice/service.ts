@@ -291,11 +291,8 @@ export async function moderateMute(
     throw notFound("Participant is not in this voice channel");
   }
   if (muted) {
-    const participants = await livekit.listParticipants(channelId);
-    const audioSid = participants.find(
-      (participant) => participant.identity === targetUserId,
-    )?.audioTrackSid;
-    if (audioSid !== null && audioSid !== undefined) {
+    const audioSid = await publishedAudioSid(livekit, channelId, targetUserId);
+    if (audioSid !== null) {
       try {
         await livekit.mutePublishedTrack(channelId, targetUserId, audioSid, true);
       } catch {
@@ -304,11 +301,8 @@ export async function moderateMute(
     }
     voiceStore.setFlags(targetUserId, { serverMuted: true, muted: true });
   } else {
-    const participants = await livekit.listParticipants(channelId);
-    const audioSid = participants.find(
-      (participant) => participant.identity === targetUserId,
-    )?.audioTrackSid;
-    if (audioSid !== null && audioSid !== undefined) {
+    const audioSid = await publishedAudioSid(livekit, channelId, targetUserId);
+    if (audioSid !== null) {
       try {
         await livekit.mutePublishedTrack(channelId, targetUserId, audioSid, false);
       } catch {
@@ -318,6 +312,23 @@ export async function moderateMute(
     voiceStore.setFlags(targetUserId, { serverMuted: false });
   }
   await broadcastVoice(db, channelId);
+}
+
+async function publishedAudioSid(
+  livekit: LiveKitAdmin,
+  room: string,
+  identity: string,
+): Promise<string | null> {
+  let participants: { identity: string; audioTrackSid: string | null }[];
+  try {
+    participants = await livekit.listParticipants(room);
+  } catch {
+    throw new HttpError(502, "LIVEKIT_ERROR", "LiveKit is unreachable");
+  }
+  return (
+    participants.find((participant) => participant.identity === identity)
+      ?.audioTrackSid ?? null
+  );
 }
 
 /** Admin disconnect (force-drop from the LiveKit room + presence). */

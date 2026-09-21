@@ -35,6 +35,18 @@ is knowingly accepted.
 | 8 | Medium | `docker-compose.yml` (livekit healthcheck) | Probe relied on GNU wget exit code 8; busybox returns 1 for any HTTP error, so the service would never become healthy and `--wait` would hang. | Healthcheck removed with a documented reason; server deliberately does not gate on LiveKit at boot (Phase 4 adds a server-side `/readyz` check). |
 | 9 | Low | `Caddyfile` | `/healthz` and `/readyz` fell through to the web static server, so smoke probes could not reach the API. | Explicit handles proxying both to `server:3000`. |
 
+## Phase 4 voice findings (adversarial review)
+
+| # | Severity | Location | Finding | Fix |
+|---|----------|----------|---------|-----|
+| V1 | Low | `apps/server/src/modules/voice/service.ts` (`moderateMute`) | `listParticipants` failures threw a raw 500 while track-mute failures mapped to 502 — inconsistent, and the 500 leaked nothing but hid the cause. | Central `publishedAudioSid` helper mapping all LiveKit outages to 502 `LIVEKIT_ERROR`. |
+| V2 | Info | `apps/server/src/modules/voice/service.ts` (`mintVoiceToken`) | Channel existence is revealed by 404-vs-403 before the membership check. | Accepted: channel ids are unguessable UUIDs, consistent with the rest of the channels API. |
+| V3 | Low | `apps/server/src/modules/voice/service.ts` (`mintVoiceToken`) | `VOICE_MAX_PARTICIPANTS` is check-then-act: a same-millisecond race can overfill by the race window (LiveKit rooms auto-create without caps). | Accepted for a friends instance; the cap is enforced again on every mint. |
+| V4 | Low | `apps/server/src/modules/voice/service.ts` (`receiveWebhook`) | A replayed valid webhook body (requires the API secret or internal-network access — i.e. full compromise already) could resurrect a left participant until reconcile. Out-of-order redelivery converges the same way. | Accepted; handlers are idempotent and the 60s reconcile heals drift. |
+| V5 | Info | `apps/server/src/modules/voice/service.ts` (track events) | Phase 4 tokens never grant screen-share publish (SFU-enforced), so `sharingScreen` cannot be set yet — the badge path is future-proofing for Phase 5. | No action. |
+| V6 | Low | one-session eviction | If the force-drop `removeParticipant` fails (LiveKit down), the store says "left" while LiveKit still lists the user; reconcile re-adds them (membership-gated) until the client actually leaves. | Accepted degradation while LiveKit is down (voice is unusable then anyway). |
+| V7 | Info | `Caddyfile`, `apps/web` | LiveKit `access_token` travels as an `/rtc` query param (verified in livekit-client source) and would land in access logs. | Caddy `format filter` now replaces both `ticket` and `access_token`; voice-token responses (JSON bodies) are never logged by pino. |
+
 ## Knowingly accepted (revisit if the threat model changes)
 
 - **A1** Username enumeration via `USERNAME_TAKEN` on register (low; standard).
