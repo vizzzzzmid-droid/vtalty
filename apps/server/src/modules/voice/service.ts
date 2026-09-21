@@ -27,18 +27,18 @@ export interface VoiceGrantFlags {
 }
 
 /**
- * Token grants per role (pure, unit-tested). Microphone only in Phase 4;
- * Phase 5 extends sources with screen_share / screen_share_audio when the
- * role allows it — the explicit sources list (instead of canPublish) is
- * the extension point. `shareScreen` is accepted now so the Phase 5 diff
- * stays inside this function.
+ * Token grants per role (pure, unit-tested). Speakers may publish the
+ * microphone, plus screen_share / screen_share_audio only with the
+ * `share_screen` flag (LiveKit enforces `canPublishSources` server-side).
  */
 export function voiceGrantsFor(flags: VoiceGrantFlags): Omit<VideoGrant, "room"> {
   if (flags.speak) {
     return {
       roomJoin: true,
       canSubscribe: true,
-      canPublishSources: [TrackSource.MICROPHONE],
+      canPublishSources: flags.shareScreen
+        ? [TrackSource.MICROPHONE, TrackSource.SCREEN_SHARE, TrackSource.SCREEN_SHARE_AUDIO]
+        : [TrackSource.MICROPHONE],
       canPublishData: false,
     };
   }
@@ -163,6 +163,7 @@ export async function handleWebhookEvent(
   roomName: string | null,
   identity: string | null,
   screenSource: boolean,
+  trackSid: string | null = null,
 ): Promise<WebhookSummary> {
   void livekit;
   void env;
@@ -216,14 +217,50 @@ export async function handleWebhookEvent(
       if (!screenSource) {
         return { event: eventName, channelId: channel.id, changed: false };
       }
-      const seat = voiceStore.setFlags(identity, {
-        sharingScreen: eventName === "track_published",
-      });
-      if (seat === null) {
-        return { event: eventName, channelId: channel.id, changed: false };
+      if (eventName === "track_unpublished") {
+        const seat = voiceStore.setFlags(identity, { sharingScreen: false });
+        if (seat === null) {
+          return { event: eventName, channelId: channel.id, changed: false };
+        }
+        await broadcastVoice(db, channel.id);
+        return { event: eventName, channelId: channel.id, changed: true };
       }
-      await broadcastVoice(db, channel.id);
-      return { event: eventName, channelId: channel.id, changed: true };
+      // New screen share: serialize the permission + limit checks so
+      // concurrent publishes cannot both slip under the cap.
+      return withChannelLock(channel.id, async () => {
+        const membership = await getMembership(db, identity, channel.serverId);
+        if (membership === null || !membership.flags.share_screen) {
+          // No permission (token grants should already prevent this):
+          // freeze the rogue track instead of advertising it.
+          if (trackSid !== null) {
+            try {
+              await livekit.mutePublishedTrack(channel.id, identity, trackSid, true);
+            } catch {
+              // Best effort; the flag below stays false either way.
+            }
+          }
+          return { event: eventName, channelId: channel.id, changed: false };
+        }
+        const sharers = voiceStore
+          .channelParticipants(channel.id)
+          .filter((seat) => seat.sharingScreen).length;
+        if (sharers >= env.VOICE_MAX_SHARERS) {
+          if (trackSid !== null) {
+            try {
+              await livekit.mutePublishedTrack(channel.id, identity, trackSid, true);
+            } catch {
+              // Best effort; the flag below stays false either way.
+            }
+          }
+          return { event: eventName, channelId: channel.id, changed: false };
+        }
+        const seat = voiceStore.setFlags(identity, { sharingScreen: true });
+        if (seat === null) {
+          return { event: eventName, channelId: channel.id, changed: false };
+        }
+        await broadcastVoice(db, channel.id);
+        return { event: eventName, channelId: channel.id, changed: true };
+      });
     }
     default:
       return { event: eventName, channelId: channel.id, changed: false };
@@ -231,6 +268,27 @@ export async function handleWebhookEvent(
 }
 
 const SCREEN_SOURCES = new Set([3, 4]); // TrackSource.SCREEN_SHARE/_AUDIO
+
+/** Single-process per-channel mutex (the store is in-memory too). */
+const channelLocks = new Map<string, Promise<void>>();
+
+function withChannelLock<T>(channelId: string, task: () => Promise<T>): Promise<T> {
+  const previous = channelLocks.get(channelId) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  channelLocks.set(channelId, current);
+  return previous
+    .catch(() => undefined)
+    .then(task)
+    .finally(() => {
+      if (channelLocks.get(channelId) === current) {
+        channelLocks.delete(channelId);
+      }
+      release();
+    });
+}
 
 /** Verify signature (raw body) and dispatch. Throws 401 on bad signature. */
 export async function receiveWebhook(
@@ -257,6 +315,7 @@ export async function receiveWebhook(
     event.room?.name ?? null,
     event.participant?.identity ?? null,
     screenSource,
+    event.track?.sid ?? null,
   );
 }
 
@@ -395,8 +454,61 @@ export interface ReconcileSummary {
 }
 
 /**
+ * Stop one user's screen share without dropping their voice: freeze the
+ * screen tracks server-side and clear the flag. Used by moderation, the
+ * sharer cap, and share-permission loss.
+ */
+export async function stopUserShare(
+  db: Db,
+  livekit: LiveKitAdmin,
+  channelId: string,
+  targetUserId: string,
+): Promise<boolean> {
+  const seat = voiceStore.get(channelId, targetUserId);
+  if (seat === null || !seat.sharingScreen) {
+    return false;
+  }
+  let screenSids: string[];
+  try {
+    const participants = await livekit.listParticipants(channelId);
+    screenSids =
+      participants.find((participant) => participant.identity === targetUserId)
+        ?.screenTrackSids ?? [];
+  } catch {
+    throw new HttpError(502, "LIVEKIT_ERROR", "LiveKit is unreachable");
+  }
+  for (const trackSid of screenSids) {
+    try {
+      await livekit.mutePublishedTrack(channelId, targetUserId, trackSid, true);
+    } catch {
+      throw new HttpError(502, "LIVEKIT_ERROR", "LiveKit stop-share failed");
+    }
+  }
+  voiceStore.setFlags(targetUserId, { sharingScreen: false });
+  await broadcastVoice(db, channelId);
+  return true;
+}
+
+/** Admin "stop this user's stream" (requires manage_members). */
+export async function moderateStopShare(
+  db: Db,
+  livekit: LiveKitAdmin,
+  actorId: string,
+  channelId: string,
+  targetUserId: string,
+): Promise<void> {
+  const channel = await findVoiceChannel(db, channelId);
+  await requirePermission(db, actorId, channel.serverId, "manage_members");
+  const stopped = await stopUserShare(db, livekit, channelId, targetUserId);
+  if (!stopped) {
+    throw notFound("Participant is not sharing in this voice channel");
+  }
+}
+
+/**
  * Evict every voice participant of a server who lost `connect` (role
- * changes, flag edits). Called after role updates; no-op when all is well.
+ * changes, flag edits), and stop shares whose owner lost `share_screen`.
+ * Called after role updates; no-op when all is well.
  */
 export async function enforceServerVoiceAccess(
   db: Db,
@@ -412,6 +524,8 @@ export async function enforceServerVoiceAccess(
       const membership = await getMembership(db, seat.userId, serverId);
       if (membership === null || !membership.flags.connect) {
         await removeFromVoice(db, livekit, serverId, seat.userId);
+      } else if (seat.sharingScreen && !membership.flags.share_screen) {
+        await stopUserShare(db, livekit, channel.id, seat.userId);
       }
     }
   }

@@ -31,6 +31,7 @@ export async function setup(overrides?: {
   uploadMaxBytes?: number;
   uploadDir?: string;
   voiceMaxParticipants?: number;
+  voiceMaxSharers?: number;
   livekit?: LiveKitAdmin;
 }): Promise<TestContext> {
   const databaseUrl = process.env["DATABASE_URL"];
@@ -51,6 +52,9 @@ export async function setup(overrides?: {
     ...(overrides?.voiceMaxParticipants === undefined
       ? {}
       : { VOICE_MAX_PARTICIPANTS: String(overrides.voiceMaxParticipants) }),
+    ...(overrides?.voiceMaxSharers === undefined
+      ? {}
+      : { VOICE_MAX_SHARERS: String(overrides.voiceMaxSharers) }),
   });
   const db = createDb(databaseUrl);
   await runMigrations(db.db);
@@ -117,23 +121,30 @@ export function authHeader(user: TestUser): Record<string, string> {
 
 /** In-memory LiveKit stand-in (CI has no LiveKit service). */
 export class FakeLiveKitAdmin implements LiveKitAdmin {
-  readonly rooms = new Map<string, Map<string, string | null>>();
+  readonly rooms = new Map<string, Map<string, { audioTrackSid: string | null; screenTrackSids: string[] }>>();
   readonly removed: { room: string; identity: string }[] = [];
   readonly muted: { room: string; identity: string; trackSid: string; muted: boolean }[] = [];
   failList = false;
   failRemove = false;
   failMute = false;
 
-  join(room: string, identity: string, audioTrackSid: string | null = "audio-sid"): void {
+  join(
+    room: string,
+    identity: string,
+    audioTrackSid: string | null = "audio-sid",
+    screenTrackSids: string[] = [],
+  ): void {
     let participants = this.rooms.get(room);
     if (participants === undefined) {
       participants = new Map();
       this.rooms.set(room, participants);
     }
-    participants.set(identity, audioTrackSid);
+    participants.set(identity, { audioTrackSid, screenTrackSids });
   }
 
-  async listParticipants(room: string): Promise<{ identity: string; audioTrackSid: string | null }[]> {
+  async listParticipants(
+    room: string,
+  ): Promise<{ identity: string; audioTrackSid: string | null; screenTrackSids: string[] }[]> {
     if (this.failList) {
       throw new Error("livekit down");
     }
@@ -141,9 +152,10 @@ export class FakeLiveKitAdmin implements LiveKitAdmin {
     if (participants === undefined) {
       return [];
     }
-    return [...participants.entries()].map(([identity, audioTrackSid]) => ({
+    return [...participants.entries()].map(([identity, info]) => ({
       identity,
-      audioTrackSid,
+      audioTrackSid: info.audioTrackSid,
+      screenTrackSids: info.screenTrackSids,
     }));
   }
 

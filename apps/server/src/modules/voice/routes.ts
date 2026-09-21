@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { voiceModerateBodySchema } from "@vitality/shared";
+import { voiceModerateBodySchema, voiceStopShareBodySchema } from "@vitality/shared";
 import type { AppDeps } from "../../app.js";
 import { authenticate } from "../../lib/auth.js";
 import { notFound } from "../../lib/errors.js";
@@ -8,6 +8,7 @@ import {
   mintVoiceToken,
   moderateDisconnect,
   moderateMute,
+  moderateStopShare,
   receiveWebhook,
 } from "./service.js";
 
@@ -73,6 +74,23 @@ export function registerVoiceRoutes(app: FastifyInstance, deps: AppDeps): void {
         request.userId,
         idParam(request, "Channel"),
         params.userId,
+      );
+      reply.code(204);
+      return null;
+    },
+  );
+
+  app.post(
+    "/api/v1/channels/:id/voice/stop-share",
+    { preHandler: [authenticate] },
+    async (request, reply) => {
+      const body = parseBody(voiceStopShareBodySchema, request.body);
+      await moderateStopShare(
+        db,
+        livekit,
+        request.userId,
+        idParam(request, "Channel"),
+        body.userId,
       );
       reply.code(204);
       return null;

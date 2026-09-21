@@ -10,6 +10,7 @@ import type { Env } from "../env.js";
 export interface LiveParticipantInfo {
   identity: string;
   audioTrackSid: string | null;
+  screenTrackSids: string[];
 }
 
 /**
@@ -47,6 +48,13 @@ export class LiveKitService implements LiveKitAdmin {
         participant.tracks.find(
           (track) => track.source === TrackSource.MICROPHONE,
         )?.sid ?? null,
+      screenTrackSids: participant.tracks
+        .filter(
+          (track) =>
+            track.source === TrackSource.SCREEN_SHARE ||
+            track.source === TrackSource.SCREEN_SHARE_AUDIO,
+        )
+        .map((track) => track.sid),
     }));
   }
 

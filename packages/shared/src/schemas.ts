@@ -119,6 +119,10 @@ export const voiceModerateBodySchema = z.object({
   muted: z.boolean(),
 });
 
+export const voiceStopShareBodySchema = z.object({
+  userId: userIdSchema,
+});
+
 export type User = z.infer<typeof userSchema>;
 export type Role = z.infer<typeof roleSchema>;
 export type RoleFlags = z.infer<typeof roleFlagsSchema>;

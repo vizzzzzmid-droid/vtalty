@@ -61,11 +61,20 @@ describe("diffVoicePresence", () => {
 
 describe("voiceGrantsFor", () => {
   it("grants microphone publishing to speakers", () => {
-    const grant = voiceGrantsFor({ speak: true, shareScreen: true });
+    const grant = voiceGrantsFor({ speak: true, shareScreen: false });
     expect(grant.roomJoin).toBe(true);
     expect(grant.canSubscribe).toBe(true);
     expect(grant.canPublishData).toBe(false);
     expect(grant.canPublishSources).toEqual([TrackSource.MICROPHONE]);
+  });
+
+  it("grants screen-share sources only with share_screen", () => {
+    const grant = voiceGrantsFor({ speak: true, shareScreen: true });
+    expect(grant.canPublishSources).toEqual([
+      TrackSource.MICROPHONE,
+      TrackSource.SCREEN_SHARE,
+      TrackSource.SCREEN_SHARE_AUDIO,
+    ]);
   });
 
   it("grants listen-only access without speak", () => {
@@ -77,6 +86,12 @@ describe("voiceGrantsFor", () => {
       canPublishData: false,
     });
     expect(grant.canPublishSources).toBeUndefined();
+  });
+
+  it("never grants screen sources without speak", () => {
+    const grant = voiceGrantsFor({ speak: false, shareScreen: true });
+    expect(grant.canPublishSources).toBeUndefined();
+    expect(grant.canPublish).toBe(false);
   });
 });
 
