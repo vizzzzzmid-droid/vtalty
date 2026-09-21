@@ -64,11 +64,24 @@ export function OfflineBanner(): React.JSX.Element | null {
 /** Screen-reader announcements for voice joins/leaves (visual UI unchanged). */
 export function VoiceAnnouncer({ state }: { state: ServerState | null }): React.JSX.Element {
   const [announcement, setAnnouncement] = useState("");
-  const previous = useRef<Map<string, string>>(new Map());
+  const previous = useRef<Map<string, string> | null>(null);
 
   useEffect(() => {
     if (state === null) {
-      previous.current = new Map();
+      previous.current = null;
+      return;
+    }
+    // First snapshot only seeds the baseline (no join-spam on load).
+    if (previous.current === null) {
+      const seed = new Map<string, string>();
+      for (const channel of state.voice) {
+        const name =
+          state.channels.find((entry) => entry.id === channel.channelId)?.name ?? "voice";
+        for (const participant of channel.participants) {
+          seed.set(`${channel.channelId}:${participant.userId}`, name);
+        }
+      }
+      previous.current = seed;
       return;
     }
     const current = new Map<string, string>();

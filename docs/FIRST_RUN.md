@@ -2,9 +2,9 @@
 
 > Nothing here has ever been executed on a real machine: every command below
 > is written for a first run. Follow the Ubuntu VPS track for production or
-> the WSL2 track for local development. Phase 4 state: text chat is fully
-> working; voice needs the `livekit` service up and UDP/TCP media ports
-> reachable (see `docs/VOICE.md`).
+> the WSL2 track for local development. Phase 6a state: text chat, voice,
+> screen share and noise suppression are all implemented; voice needs the
+> `livekit` service up and UDP/TCP media ports reachable (see `docs/VOICE.md`).
 
 ## 0. Prerequisites
 
@@ -31,19 +31,37 @@ sudo ufw allow 3478/udp
 sudo ufw allow 5349/tcp
 sudo ufw enable
 
-# 3. Get the code and configure secrets
+# 3. Get the code and configure secrets (no manual editing needed)
 git clone <your-repo-url> vitality
 cd vitality
-cp .env.example .env
-cp livekit.example.yaml livekit.yaml
-nano .env            # set POSTGRES_PASSWORD, JWT_ACCESS_SECRET, LIVEKIT_API_SECRET
-nano livekit.yaml    # same LIVEKIT_API_SECRET under keys:, plus CADDY_DOMAIN in .env
+node scripts/init.mjs --domain vitality.kirskiy.shop --ip <vps-public-ip>
+# (omit the flags on a throwaway box: you will be prompted; --force to redo)
 ```
 
-Expected: no output from the `cp` commands; `nano` edits persist.
+Expected output (keys differ every run):
+
+```text
+Wrote .env and livekit.yaml with fresh random secrets.
+  CADDY_DOMAIN=vitality.kirskiy.shop
+  LIVEKIT_PUBLIC_URL=wss://vitality.kirskiy.shop/livekit
+
+Next steps:
+  1. make doctor     # preflight checks (ports, secrets, DNS)
+  2. make up         # build and start the full stack
+  3. Open https://vitality.kirskiy.shop and register the first user (becomes owner).
+```
 
 ```bash
-# 4. Start everything
+# 4. Preflight: fix every FAIL before continuing
+make doctor
+```
+
+Expected: a checklist ending `N ok, 0 warnings, 0 failures` (DNS may WARN
+until the A record propagates — that one is safe to proceed past only for
+`localhost` runs; production needs it green for ACME).
+
+```bash
+# 5. Start everything
 make up              # == docker compose up --build
 ```
 
@@ -52,7 +70,7 @@ applied` in `make logs`); `caddy` issues an ACME certificate within a
 minute (check `docker compose logs caddy` for `certificate obtained`).
 
 ```bash
-# 5. Verify
+# 6. Verify
 curl -f https://vitality.kirskiy.shop/healthz        # {"status":"ok",...}
 curl -f https://vitality.kirskiy.shop/api/v1/health  # same, via proxy
 ```
@@ -68,8 +86,8 @@ create an invite in Settings → Invites, and have a friend join.
 sudo apt update && sudo apt install -y docker.io docker-compose-plugin nodejs npm
 # (Or Docker Desktop with WSL2 integration — either works.)
 cd /mnt/c/Users/<you>/Documents/vitality   # or wherever the repo lives
-cp .env.example .env
-cp livekit.example.yaml livekit.yaml
+node scripts/init.mjs                       # accept localhost defaults
+make doctor                                 # docker FAILs are fine here if you only run host dev
 make dev
 pnpm install
 # Terminal 1:
@@ -102,8 +120,8 @@ default — `sudo service docker start` if the daemon is down.
 3. **Browsers warn about HTTPS on localhost** — expected: Caddy uses an
    internal CA for `localhost`. Accept the exception (dev only).
 4. **Server exits with `DATABASE_URL` / secret errors** — `.env` was not
-   created or a `?set ... in .env` variable is empty. Compare with
-   `.env.example`.
+   created (`make init`) or a `?set ... in .env` variable is empty. Compare
+   with `.env.example`; `make doctor` catches this.
 5. **`migrations applied` never appears / `/readyz` returns 503** —
    Postgres is still starting or credentials mismatch. `docker compose logs
    postgres`; verify `POSTGRES_*` match `DATABASE_URL`.

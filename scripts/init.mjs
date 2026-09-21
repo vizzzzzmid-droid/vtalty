@@ -146,8 +146,12 @@ async function main() {
   };
   const envExample = readFileSync(ENV_EXAMPLE, "utf8");
   const livekitExample = readFileSync(LIVEKIT_EXAMPLE, "utf8");
-  writeFileSync(ENV_FILE, buildEnv(envExample, secrets, domain), "utf8");
-  writeFileSync(LIVEKIT_FILE, buildLivekitYaml(livekitExample, secrets), "utf8");
+  // Owner-only permissions: both files hold live secrets.
+  writeFileSync(ENV_FILE, buildEnv(envExample, secrets, domain), { encoding: "utf8", mode: 0o600 });
+  writeFileSync(LIVEKIT_FILE, buildLivekitYaml(livekitExample, secrets), {
+    encoding: "utf8",
+    mode: 0o600,
+  });
 
   console.log("Wrote .env and livekit.yaml with fresh random secrets.");
   console.log(`  CADDY_DOMAIN=${domain}`);

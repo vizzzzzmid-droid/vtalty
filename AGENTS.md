@@ -21,9 +21,9 @@
 - Full plan: `docs/ARCHITECTURE.md` (read it first). Deferred items:
   `docs/ROADMAP.md`. Manual voice test checklist: `docs/MANUAL_TESTS.md`
   (from Phase 4).
-- Current phase: **Phase 5 — DONE (verified locally except Docker/live
-  media; integration, e2e-voice + compose smoke need CI/VPS)**. Next:
-  Phase 6 Electron + final docs (starts only after user says "continue").
+- Current phase: **Phase 6a — DONE (verified locally except Docker/live
+  media/CI-only jobs)**. Next: Phase 6b Electron desktop app (starts ONLY
+  after user says "continue 6b").
 - Repo root moved to `vitality/` (clean dir; parent `Default Project` holds
   unrelated files). All paths below are relative to `vitality/`.
 - Local toolchain (this Windows machine): Node 24.19 + pnpm 9.15.0 via
@@ -62,6 +62,8 @@ Caddyfile  livekit.example.yaml
 docker-compose.yml  docker-compose.dev.yml
 pnpm-workspace.yaml  package.json
 docs/ARCHITECTURE.md  docs/ROADMAP.md  docs/MANUAL_TESTS.md
+docs/VOICE.md  docs/FIRST_RUN.md  docs/ADMIN.md  docs/TEST_STATUS.md
+docs/SECURITY_NOTES.md  scripts/{init,preflight,backup,restore}.mjs
 packages/shared/src/{events.ts,schemas.ts,constants.ts}
 apps/server/src/{index.ts,env.ts,db/,modules/*/,ws/,plugins/,lib/}
 apps/web/src/{api/,ws/,store/,voice/,audio/,components/,styles/}
@@ -212,7 +214,26 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   FIRST_RUN unchanged. Verified locally: typecheck/lint clean, unit tests
   green, `pnpm build` (+ dist wasm/worklet listing), YAML/Caddyfile checks.
   Live media, integration, e2e and compose smoke require CI/VPS.
-- [ ] Phase 6 — Electron polish + e2e + final docs.
+- [x] Phase 6a — First-run friction, polish, hardening, ops docs. `make
+  init`/`make doctor` (zero-dep Node scripts, flags/prompts, 0600 secrets,
+  tested via node:test + executed locally); `make backup`/`make restore`
+  (pg_dump + volume archive, confirm-gated, cron doc). Bundle 1167→475 KB
+  initial (settings/markdown/livekit-client/suppressor code-split; gzip
+  330→144 KB). Orphan-upload purge job + test. Mentions in all markdown
+  contexts + XSS tests. A11y (AA palette: accent-strong fills, muted
+  lightened, LIVE red darkened — all computed; reduced-motion; voice
+  live-region; focus trap via Radix), axe e2e gate, toasts, offline banner,
+  loading/error/retry states, dialog errors, Ctrl+K switcher. Docker:
+  digest pins (fetched), no-new-privileges, read-only server/web + tmpfs,
+  json log rotation, healthchecks kept. `pnpm audit` gate (fixed ws HIGHs),
+  dependency-review, Renovate. Final review: 0600 secrets/backups,
+  announcer-first-load, non-member state 404 already covered. Docs:
+  ADMIN.md, README rewrite, TEST_STATUS.md, FIRST_RUN init/doctor,
+  VOICE bandwidth, SECURITY_NOTES S1–S7. Verified locally: typecheck/lint
+  clean, 76 unit + 7 script tests green, `pnpm build`, YAML/Caddyfile
+  checks, init+doctor executed, contrast computed. Docker/CI-only jobs
+  (integration, e2e, smoke) still need CI/VPS.
+- [ ] Phase 6b — Electron desktop app (starts only after "continue 6b").
 
 ## 8. Known issues / risks
 

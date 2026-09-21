@@ -46,7 +46,8 @@ async function main() {
   if (dump.status !== 0 || dump.stdout.length === 0) {
     throw new Error(`pg_dump failed:\n${dump.stderr ?? ""}\nIs the stack up? (make up)`);
   }
-  writeFileSync(sqlFile, dump.stdout, "utf8");
+  // Owner-only: dumps contain password hashes and private messages.
+  writeFileSync(sqlFile, dump.stdout, { encoding: "utf8", mode: 0o600 });
 
   // Uploads volume archive (read-only mount + temp alpine).
   const uploadsFile = path.join(outDir, `uploads-${tag}.tar.gz`);

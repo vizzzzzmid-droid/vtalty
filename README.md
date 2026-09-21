@@ -1,101 +1,81 @@
 # vitality — self-hosted voice & text for friends
 
-Phase 5: screen sharing (presets, opt-in watching, moderation) and noise
-suppression (Off/Standard/RNNoise Enhanced + gate + loopback test) with
-per-user Voice & Audio settings synced across devices. See `docs/VOICE.md`
-for networking and `docs/FIRST_RUN.md` for the first-run checklist.
+A Discord-like communication platform you run yourself on one small VPS:
+text channels with markdown and uploads, voice channels on a self-hosted
+LiveKit SFU, screen sharing, and neural noise suppression — wrapped in a
+dark four-zone UI (server rail, channels, chat, members).
 
-## Quick start (full stack)
+## Features
 
-Requirements: Docker + Docker Compose v2.
+- Text: ULID history with cursor pagination, sanitized markdown, edit/delete,
+  uploads (magic-bytes validation), typing indicators, @mentions, unread
+  badges + new-message divider, read states.
+- Voice: join/leave, sidebar presence for everyone, speaking ring,
+  mute/deafen (server-enforced), per-user volume, devices, push-to-talk,
+  reconnect, admin server-mute/disconnect, generated UI sounds.
+- Screen share: presets (720p30/1080p30/1080p60/source), detail/motion
+  hints, opt-in watching, theater + fullscreen, per-stream volume/quality,
+  sharer cap, stop-stream moderation.
+- Noise: Off / Standard (browser constraints) / Enhanced (RNNoise WASM),
+  plus noise gate, mic test, loopback check; settings sync across devices.
+- Ops: one-command Docker stack (Caddy HTTPS, Postgres, LiveKit+TURN),
+  `make init`/`make doctor`, backups, healthchecks, structured logs.
 
-```bash
-cp .env.example .env
-cp livekit.example.yaml livekit.yaml
-# Edit .env and livekit.yaml secrets (JWT_ACCESS_SECRET, LIVEKIT_API_SECRET, POSTGRES_PASSWORD)
-make up
-```
-
-Open `https://localhost` (Caddy serves localhost over HTTPS with an internal
-CA — accept the browser warning in dev). Health: `https://localhost/api/health`,
-readiness: `https://localhost/api/ready` (proxied to the server).
-
-Production (`vitality.kirskiy.shop`): point DNS at the VPS, set
-`CADDY_DOMAIN=vitality.kirskiy.shop` in `.env`, ensure ports 80/443 are
-reachable so Caddy can issue ACME certificates.
-
-## First run (accounts and invites)
-
-Registration is invite-only by default (`REGISTRATION_MODE` in `.env`):
-
-1. Register the first user in the web UI — they become the server owner,
-   no invite needed, and a seeded server (`Text/#general`, `Voice/General`)
-   is created automatically.
-2. As owner, open Settings → Invites → Create invite, and share the code.
-3. Friends register with the invite code and land in the server as members.
-
-Sessions use a short-lived access JWT (15 min) plus a rotating refresh
-cookie; reused refresh tokens revoke the whole session family.
-
-## Host development
+## Quick start (3 commands)
 
 ```bash
-cp .env.example .env
-cp livekit.example.yaml livekit.yaml
-make dev
-pnpm install
-# Terminal 1 (DATABASE_URL=postgres://vitality:<pw>@127.0.0.1:5432/vitality):
-pnpm --filter @vitality/server dev
-# Terminal 2:
-pnpm --filter @vitality/web dev   # http://127.0.0.1:5173, /api proxied to :3000
+make init     # creates .env + livekit.yaml with random secrets
+make doctor   # preflight: docker, ports, secrets, DNS, disk
+make up       # build + start everything over HTTPS
 ```
 
-## Ports and firewall
+Then open `https://<your-domain>` (or `https://localhost`, accepting the
+internal-CA warning) and register the first user — they become the owner.
+Full walkthrough with expected outputs: `docs/FIRST_RUN.md`.
 
-| Port(s)    | Proto  | Exposed to | Purpose                                |
-|------------|--------|------------|----------------------------------------|
-| 80         | TCP    | world      | ACME HTTP-01 + redirect to HTTPS       |
-| 443        | TCP    | world      | HTTPS (app, API, WS, LiveKit signalling) |
-| 443        | UDP    | world      | HTTP/3 (Caddy, optional)               |
-| 7881       | TCP    | world      | WebRTC ICE over TCP (fallback)         |
-| 7882       | UDP    | world      | WebRTC media (UDP mux, single port)    |
-| 3478       | UDP    | world      | TURN/UDP (+STUN)                       |
-| 5349       | TCP    | world      | TURN/TLS                               |
-| 3000/7880/5432 | —  | never public (docker network only) | Internal services |
+## Architecture
 
-On Linux production hosts prefer `network_mode: host` for the `livekit`
-service (better media performance); the default bridge mode works everywhere
-including dev. `rtc.use_external_ip: true` is required in `livekit.yaml`
-behind NAT/Docker.
-
-## WebRTC troubleshooting (short version)
-
-- Works on LAN/localhost but not via domain: check `use_external_ip`,
-  firewall UDP 7882/3478, and that the site loads over valid HTTPS
-  (microphone/screen capture require a secure context).
-- Drops on corporate VPNs: traffic should fall back to ICE/TCP 7881, then
-  TURN/TLS 5349 — keep both open. Debug with `chrome://webrtc-internals`
-  and `docker compose logs livekit`.
-- Full checklist: `docs/ARCHITECTURE.md` section 12.
-
-## Repo layout
-
-```text
-apps/server      # Fastify REST + WS gateway (Phase 1: health/readiness + migrations)
-apps/web         # React status page (Phase 1; Discord-like shell in Phase 2)
-packages/shared  # zod schemas, versioned WS event types, constants
-livekit.example.yaml / Caddyfile / docker-compose.yml / docker-compose.dev.yml
-docs/ARCHITECTURE.md  docs/ROADMAP.md  docs/MANUAL_TESTS.md
+```mermaid
+flowchart LR
+  Browser -->|HTTPS/WSS| Caddy
+  Caddy -->|/api /ws| Server[Fastify REST + WS]
+  Caddy -->|/livekit| LiveKit[LiveKit SFU + TURN]
+  Caddy -->|/| Web[React SPA]
+  Server --> Postgres[(PostgreSQL 16)]
+  Server -. webhooks .-> LiveKit
 ```
 
-## Backup / restore (summary)
+Monorepo (`pnpm` workspaces): `apps/server` (Fastify, Drizzle, zod),
+`apps/web` (React, Vite, Tailwind, livekit-client), `packages/shared`
+(zod protocol contract). Details: `docs/ARCHITECTURE.md`.
 
-- Database: `docker compose exec postgres pg_dump -U vitality vitality > backup.sql`
-  (full pg_dump runbook lands in Phase 6 docs).
-- Uploads volume: snapshot the `vitality-uploads` Docker volume alongside the dump.
+## Screenshots
+
+_TODO: add screenshots after the first production deploy (login, channel
+shell, voice call, screen share). Placeholder — do not ship stock art._
 
 ## Docs
 
-- `docs/ARCHITECTURE.md` — build contract for Phases 1–6.
-- `docs/ROADMAP.md` — deferred / non-MVP items.
-- `AGENTS.md` — conventions for continuing AI agents.
+- `docs/FIRST_RUN.md` — zero-to-running checklist (start here).
+- `docs/ADMIN.md` — env reference, sizing, upgrades, backups, reverse-proxy,
+  security checklist.
+- `docs/VOICE.md` — LiveKit networking, bandwidth math, troubleshooting.
+- `docs/TEST_STATUS.md` — what tests cover (and what only humans can).
+- `docs/MANUAL_TESTS.md` — real-device test matrix.
+- `docs/SECURITY_NOTES.md` — threat model, findings, accepted risks.
+- `docs/ROADMAP.md` — deferred items. `AGENTS.md` — AI-agent conventions.
+
+## Development
+
+```bash
+make dev      # postgres + livekit in Docker; server/web on the host
+pnpm install
+pnpm --filter @vitality/server dev   # :3000 (needs DATABASE_URL, see README)
+pnpm --filter @vitality/web dev      # :5173, /api + /ws proxied
+pnpm lint / pnpm typecheck / pnpm test / pnpm build
+```
+
+## License
+
+TBD — pick before public release (MIT suggested for the code; verify
+third-party licenses in `pnpm-lock.yaml` first).
