@@ -10,12 +10,15 @@
 	encode gzip
 
 	# Access logs: Cookie/Authorization headers are REDACTED by Caddy's
-	# default. The single-use WS `ticket` query param is scrubbed below so
-	# it never lands in logs (verified against Caddy log directive docs).
+	# default. The single-use WS `ticket` and LiveKit `access_token` query
+	# params are scrubbed below so join tokens never land in logs
+	# (verified against Caddy log directive docs + livekit-client source,
+	# which sends access_token as an /rtc query param).
 	log {
 		format filter {
 			request>uri query {
 				replace ticket REDACTED
+				replace access_token REDACTED
 			}
 		}
 	}

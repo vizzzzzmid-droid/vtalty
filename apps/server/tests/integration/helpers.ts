@@ -1,10 +1,13 @@
+import { createHash } from "node:crypto";
 import { sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import jwt from "jsonwebtoken";
 import { describe } from "vitest";
 import { buildApp } from "../../src/app.js";
 import { createDb, type DbHandle } from "../../src/db/client.js";
 import { runMigrations } from "../../src/db/migrate.js";
 import { loadEnv, type Env } from "../../src/env.js";
+import type { LiveKitAdmin } from "../../src/lib/livekit.js";
 
 export interface TestContext {
   app: FastifyInstance;
@@ -27,6 +30,8 @@ export { describeIf };
 export async function setup(overrides?: {
   uploadMaxBytes?: number;
   uploadDir?: string;
+  voiceMaxParticipants?: number;
+  livekit?: LiveKitAdmin;
 }): Promise<TestContext> {
   const databaseUrl = process.env["DATABASE_URL"];
   if (databaseUrl === undefined) {
@@ -43,11 +48,18 @@ export async function setup(overrides?: {
     ...(overrides?.uploadDir === undefined
       ? {}
       : { UPLOAD_DIR: overrides.uploadDir }),
+    ...(overrides?.voiceMaxParticipants === undefined
+      ? {}
+      : { VOICE_MAX_PARTICIPANTS: String(overrides.voiceMaxParticipants) }),
   });
   const db = createDb(databaseUrl);
   await runMigrations(db.db);
   await db.db.execute(sql`TRUNCATE users, servers CASCADE`);
-  const app = await buildApp({ env, db: db.db });
+  const app = await buildApp({
+    env,
+    db: db.db,
+    ...(overrides?.livekit === undefined ? {} : { livekit: overrides.livekit }),
+  });
   return { app, db, env };
 }
 
@@ -61,8 +73,7 @@ export async function teardown(ctx: TestContext): Promise<void> {
   await ctx.db.close();
 }
 
-export function extractRefreshCookie(headers: unknown): string {
-  const record = headers as Record<string, string | string[] | undefined>;
+export function extractRefreshCookie(headers: unknown): string {  const record = headers as Record<string, string | string[] | undefined>;
   const raw = record["set-cookie"];
   const cookies = Array.isArray(raw) ? raw : raw === undefined ? [] : [raw];
   const match = cookies
@@ -102,4 +113,82 @@ export async function registerUser(
 
 export function authHeader(user: TestUser): Record<string, string> {
   return { authorization: `Bearer ${user.accessToken}` };
+}
+
+/** In-memory LiveKit stand-in (CI has no LiveKit service). */
+export class FakeLiveKitAdmin implements LiveKitAdmin {
+  readonly rooms = new Map<string, Map<string, string | null>>();
+  readonly removed: { room: string; identity: string }[] = [];
+  readonly muted: { room: string; identity: string; trackSid: string; muted: boolean }[] = [];
+  failList = false;
+  failRemove = false;
+  failMute = false;
+
+  join(room: string, identity: string, audioTrackSid: string | null = "audio-sid"): void {
+    let participants = this.rooms.get(room);
+    if (participants === undefined) {
+      participants = new Map();
+      this.rooms.set(room, participants);
+    }
+    participants.set(identity, audioTrackSid);
+  }
+
+  async listParticipants(room: string): Promise<{ identity: string; audioTrackSid: string | null }[]> {
+    if (this.failList) {
+      throw new Error("livekit down");
+    }
+    const participants = this.rooms.get(room);
+    if (participants === undefined) {
+      return [];
+    }
+    return [...participants.entries()].map(([identity, audioTrackSid]) => ({
+      identity,
+      audioTrackSid,
+    }));
+  }
+
+  async removeParticipant(room: string, identity: string): Promise<void> {
+    if (this.failRemove) {
+      throw new Error("livekit down");
+    }
+    this.rooms.get(room)?.delete(identity);
+    this.removed.push({ room, identity });
+  }
+
+  async mutePublishedTrack(
+    room: string,
+    identity: string,
+    trackSid: string,
+    muted: boolean,
+  ): Promise<void> {
+    if (this.failMute) {
+      throw new Error("livekit down");
+    }
+    this.muted.push({ room, identity, trackSid, muted });
+  }
+}
+
+/**
+ * Sign a webhook body the way LiveKit does: JWT (iss = api key, exp
+ * required) whose sha256 claim is the base64 body digest.
+ */
+export function signWebhookBody(
+  body: string,
+  apiKey: string,
+  apiSecret: string,
+): string {
+  const digest = createHash("sha256").update(body).digest();
+  const sha256 = Buffer.from(digest).toString("base64");
+  return jwt.sign(
+    { iss: apiKey, sha256, exp: Math.floor(Date.now() / 1000) + 60 },
+    apiSecret,
+    { algorithm: "HS256" },
+  );
+}
+
+export function webhookHeaders(body: string): Record<string, string> {
+  return {
+    "content-type": "application/webhook+json",
+    authorization: signWebhookBody(body, "devkey", "devsecret"),
+  };
 }

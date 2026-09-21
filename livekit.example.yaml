@@ -7,8 +7,19 @@
 # - `rtc.udp_port` accepts a single port (UDP mux, fewer firewall rules) or a
 #   small range such as 7882-7892. Single port 7882 chosen for a small VPS.
 # - `log_level` is a top-level key.
-# - On Linux production hosts prefer `network_mode: host` for this service
-#   (see README "WebRTC troubleshooting"); bridge mode is the portable default.
+# - Signalling reaches LiveKit through Caddy (`/livekit` path prefix, see
+#   Caddyfile); the client is told `wss://<domain>/livekit` and appends
+#   `/rtc` itself (verified in livekit-client source).
+# - Host networking vs published ports: on a Linux VPS prefer
+#   `network_mode: host` for this service (best media performance, no NAT
+#   hairpin between container and host). The compose files use published
+#   ports (bridge) because that works everywhere, including Docker Desktop
+#   and dev machines. See docs/VOICE.md for the trade-off.
+# - TURN/TLS certificates are OPTIONAL. Without `domain` + `cert_file` /
+#   `key_file`, TURN/TLS still listens on 5349 but clients outside TLS
+#   interception can use TURN/UDP 3478 and ICE/TCP 7881 instead. Corporate
+#   firewalls that only pass 443-shaped traffic need TURN/TLS with a real
+#   cert (or run turn.tls_port on 443 behind an L4 LB) — see docs/VOICE.md.
 
 port: 7880
 log_level: info
@@ -35,4 +46,4 @@ room:
 webhook:
   api_key: devkey
   urls:
-    - http://server:3000/api/v1/voice/webhook
+    - http://server:3000/webhooks/livekit

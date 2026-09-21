@@ -51,6 +51,8 @@ services:
       LIVEKIT_URL: http://livekit:7880
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?set LIVEKIT_API_SECRET in .env}
+      LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL:-wss://localhost/livekit}
+      VOICE_MAX_PARTICIPANTS: ${VOICE_MAX_PARTICIPANTS:-15}
       UPLOAD_DIR: /data/uploads
     volumes:
       - uploads:/data/uploads
