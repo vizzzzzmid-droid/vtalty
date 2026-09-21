@@ -1,6 +1,8 @@
-import { Hash, Volume2 } from "lucide-react";
+import { Volume2 } from "lucide-react";
 import type { Channel } from "@vitality/shared";
 
+// Placeholder for voice channels (Phase 4) and the empty-selection state.
+// Text channels render ChatView instead (see App shell).
 export function MainView({ channel }: { channel: Channel | null }): React.JSX.Element {
   if (channel === null) {
     return (
@@ -12,21 +14,16 @@ export function MainView({ channel }: { channel: Channel | null }): React.JSX.El
     );
   }
 
-  const Icon = channel.type === "voice" ? Volume2 : Hash;
-  const note =
-    channel.type === "voice"
-      ? "Voice channels arrive in Phase 4 (LiveKit): sidebar participants, mute/deafen, push-to-talk."
-      : "Text chat arrives in Phase 3: history, markdown, uploads, typing, unread badges.";
-
   return (
     <div className="flex min-w-0 flex-1 flex-col [background-color:var(--surface-3)]">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b border-black/20 px-4">
-        <Icon size={18} aria-hidden="true" className="[color:var(--text-muted)]" />
+        <Volume2 size={18} aria-hidden="true" className="[color:var(--text-muted)]" />
         <h2 className="truncate text-sm font-semibold">{channel.name}</h2>
       </header>
       <div className="flex flex-1 items-center justify-center px-6">
         <p className="max-w-md text-center text-sm [color:var(--text-muted)]">
-          {note}
+          Voice channels arrive in Phase 4 (LiveKit): sidebar participants,
+          mute/deafen, push-to-talk.
         </p>
       </div>
     </div>

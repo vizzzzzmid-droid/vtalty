@@ -5,6 +5,8 @@ node_modules/
 # Build output
 dist/
 coverage/
+playwright-report/
+test-results/
 
 # Environment and secrets (never commit real values)
 .env

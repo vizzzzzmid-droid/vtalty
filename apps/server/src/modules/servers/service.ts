@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import {
   serverStateSchema,
   type Category,
@@ -12,6 +12,7 @@ import {
   channelCategories,
   channels,
   members,
+  readStates,
   roles,
   servers,
   users,
@@ -239,6 +240,18 @@ export async function getServerState(
     .from(channels)
     .where(eq(channels.serverId, serverId))
     .orderBy(asc(channels.position));
+  const readRows = await db
+    .select()
+    .from(readStates)
+    .where(
+      and(
+        eq(readStates.userId, userId),
+        inArray(
+          readStates.channelId,
+          channelRows.map((row) => row.id),
+        ),
+      ),
+    );
 
   const memberList: MemberWithUser[] = memberRows.map((row) => ({
     id: row.member.id,
@@ -286,7 +299,10 @@ export async function getServerState(
       categories,
       channels: channelList,
       voice: [],
-      readStates: [],
+      readStates: readRows.map((row) => ({
+        channelId: row.channelId,
+        lastReadMessageId: row.lastReadMessageId,
+      })),
     });
   } catch {
     throw new HttpError(

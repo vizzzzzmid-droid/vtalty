@@ -7,6 +7,6 @@
     "build": "pnpm --filter @vitality/shared build && pnpm --filter @vitality/server build && pnpm --filter @vitality/web build",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm --filter @vitality/shared build && pnpm -r typecheck",
-    "test": "pnpm -r test"
+    "test": "pnpm --filter @vitality/shared build && pnpm -r test"
   }
 }

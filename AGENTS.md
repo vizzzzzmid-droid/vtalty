@@ -21,9 +21,9 @@
 - Full plan: `docs/ARCHITECTURE.md` (read it first). Deferred items:
   `docs/ROADMAP.md`. Manual voice test checklist: `docs/MANUAL_TESTS.md`
   (from Phase 4).
-- Current phase: **Phase 2.5 — DONE (verified locally; integration +
-  compose smoke need VPS/CI)**. Next: Phase 3 text chat (starts only after
-  user says "continue").
+- Current phase: **Phase 3 — DONE (verified locally; integration, e2e +
+  compose smoke need CI/VPS)**. Next: Phase 4 voice/LiveKit (starts only
+  after user says "continue").
 - Repo root moved to `vitality/` (clean dir; parent `Default Project` holds
   unrelated files). All paths below are relative to `vitality/`.
 - Local toolchain (this Windows machine): Node 24.19 + pnpm 9.15.0 via
@@ -109,6 +109,12 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   Token endpoint checks permissions then `AccessToken` + `addGrant` +
   `toJwt()`. Webhooks (`application/webhook+json`, raw body,
   `WebhookReceiver.receive`) drive authoritative `voice.state` fan-out.
+  (Phase 4.)
+- Chat (Phase 3 DONE): ULID ids, cursor pagination, soft delete, mentions
+  table, read_states + `/unread`, magic-bytes uploads on local volume,
+  markdown via react-markdown+remark-gfm with safeUrl allowlist.
+- `pnpm test` / `typecheck` build `@vitality/shared` first (web tests and
+  all typechecks consume shared `dist`; keeps CI order-independent).
 - Ports: 80/443 (Caddy), 7881/tcp ICE, 7882/udp media mux, 3478/udp
   TURN, 5349/tcp TURN/TLS (443 if no LB), 50000–60000/udp only in
   port-range mode. `use_external_ip: true` in prod; host networking for
@@ -149,6 +155,20 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   handles. Adversarial review → 9 fixes (atomic invite redeem, kick-admin
   rule, state 404, typing throttle, maxPayload, tickets, argon2 pin) with
   regression tests; residuals in `docs/SECURITY_NOTES.md`.
+- [x] Phase 3 — Text chat. ULID messages + cursor pagination
+  (before/after/around, limit+1 hasMore), send/edit/delete with
+  send_messages + author/admin rules, soft delete, per-user 30/min send and
+  upload limiters, @mentions (server table + unread mention counts),
+  read_states + per-server unread endpoint, message.* WS fan-out with
+  precise TanStack cache patching, uploads (magic-bytes allowlist,
+  random keys, local volume driver, inline images vs attachment, nosniff),
+  sanitizing markdown pipeline (react-markdown + remark-gfm, no raw HTML,
+  safeUrl allowlist, mention highlight), chat UI (anchored infinite scroll,
+  bottom-only autoscroll, new-messages divider, typing bar, mention
+  autocomplete, upload chips, edit/delete, unread/mention badges),
+  Playwright e2e + CI `e2e` job. Migration `0003` (messages, attachments,
+  message_mentions, read_states). Verified: typecheck/lint clean,
+  58 unit tests green, `pnpm build`, YAML/Caddyfile checks.
 - [ ] Phase 3 — Text chat.
 - [ ] Phase 4 — Voice (LiveKit).
 - [ ] Phase 5 — Screen share + noise suppression.
@@ -164,9 +184,12 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   cp livekit.example.yaml livekit.yaml && make up`, then open
   `https://localhost`, accept the internal-CA warning). CI runs
   `docker compose config` + full image builds as a partial substitute.
-- Server integration test (`test:integration`, real Postgres) runs in CI
-  (postgres:16 service) and via `make test-integration`; plain `pnpm test`
-  stays hermetic (test skips without DATABASE_URL).
+- Server integration tests (`test:integration`, real Postgres) and the
+  Playwright e2e suite run in CI (postgres:16 service; e2e boots the built
+  API + Vite dev + Chromium) and via `make test-integration` /
+  `make test-e2e`; plain `pnpm test` stays hermetic.
+  `docker compose up` smoke runs in CI (`compose-smoke`) and must additionally
+  pass once on the Ubuntu VPS.
 - No `git` binary on this machine; no commits were made. Init repo + first
   conventional commit should happen on the dev machine/VPS.
 - LiveKit `livekit.yaml` keys verified against upstream `config-sample.yaml`
@@ -175,3 +198,7 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   or a small range — re-check against the pinned v1.13 image in Phase 4.
 - `pnpm -r typecheck` requires shared `dist`: root `typecheck` script builds
   `@vitality/shared` first (documented workaround, keep it).
+- Web bundle is ~600 KB (radix + markdown); code-splitting deferred.
+- Unclaimed uploads (chips removed before send) stay orphaned; cleanup cron
+  deferred to ROADMAP.
+- Mentions highlight only top-level paragraph text (not inside code/bold).

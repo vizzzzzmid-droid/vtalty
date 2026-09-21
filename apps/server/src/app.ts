@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
+import multipart from "@fastify/multipart";
 import rateLimit from "@fastify/rate-limit";
 import { ZodError } from "zod";
 import type { Db } from "./db/client.js";
@@ -12,9 +13,12 @@ import { registerAuthRoutes } from "./modules/auth/routes.js";
 import { registerChannelRoutes } from "./modules/channels/routes.js";
 import { registerInviteRoutes } from "./modules/invites/routes.js";
 import { registerMemberRoutes } from "./modules/members/routes.js";
+import { registerMessageRoutes } from "./modules/messages/routes.js";
 import { registerRoleRoutes } from "./modules/roles/routes.js";
 import { registerServerRoutes } from "./modules/servers/routes.js";
 import { registerUserRoutes } from "./modules/users/routes.js";
+import { LocalStorage, type UploadStorage } from "./modules/uploads/storage.js";
+import { registerUploadRoutes } from "./modules/uploads/routes.js";
 import { registerWsTicketRoutes } from "./modules/ws-tickets/routes.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerGateway } from "./ws/gateway.js";
@@ -22,6 +26,8 @@ import { registerGateway } from "./ws/gateway.js";
 export interface AppDeps {
   env: Env;
   db: Db;
+  /** Overridden in tests; defaults to local disk under UPLOAD_DIR. */
+  storage?: UploadStorage;
 }
 
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
@@ -72,6 +78,11 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   // Coarse global cap; auth routes add stricter per-route limits.
   await app.register(rateLimit, { max: 300, timeWindow: "1 minute" });
   await app.register(cookie);
+  await app.register(multipart, {
+    limits: { fileSize: deps.env.UPLOAD_MAX_BYTES, files: 10 },
+    throwFileSizeLimit: true,
+  });
+  const storage = deps.storage ?? new LocalStorage(deps.env.UPLOAD_DIR);
 
   registerHealthRoutes(app, deps);
   registerAuthRoutes(app, deps);
@@ -80,6 +91,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   registerChannelRoutes(app, deps);
   registerInviteRoutes(app, deps);
   registerMemberRoutes(app, deps);
+  registerMessageRoutes(app, deps);
+  registerUploadRoutes(app, { ...deps, storage });
   registerRoleRoutes(app, deps);
   registerWsTicketRoutes(app, deps);
   await registerGateway(app, deps);

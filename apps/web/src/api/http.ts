@@ -7,9 +7,21 @@ export function setAccessToken(token: string | null): void {
   accessToken = token;
 }
 
+export function getAccessToken(): string | null {
+  return accessToken;
+}
+
 /** Registered once by the session store (avoids a store->http import cycle). */
 export function setRefreshHandler(handler: () => Promise<string | null>): void {
   refreshHandler = handler;
+}
+
+/** Run the registered refresh handler (used by non-JSON callers). */
+export async function ensureFreshSession(): Promise<boolean> {
+  if (refreshHandler === null) {
+    return false;
+  }
+  return (await refreshHandler()) !== null;
 }
 
 export class ApiError extends Error {

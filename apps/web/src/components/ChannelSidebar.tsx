@@ -31,17 +31,21 @@ function ChannelRow({
   channel,
   selected,
   canManage,
+  badge,
   onEdit,
   onDelete,
 }: {
   channel: Channel;
   selected: boolean;
   canManage: boolean;
+  badge?: { unreadCount: number; mentionCount: number };
   onEdit: () => void;
   onDelete: () => void;
 }): React.JSX.Element {
   const selectChannel = useUiStore((state) => state.selectChannel);
   const Icon = channel.type === "voice" ? Volume2 : Hash;
+  const unread = badge?.unreadCount ?? 0;
+  const mentions = badge?.mentionCount ?? 0;
   return (
     <div
       className={`group flex items-center gap-1 rounded px-2 py-1 ${
@@ -61,6 +65,22 @@ function ChannelRow({
         />
         <span className="truncate text-sm">{channel.name}</span>
       </button>
+      {mentions > 0 ? (
+        <span
+          aria-label={`${mentions} mentions in ${channel.name}`}
+          className="shrink-0 rounded-full px-1.5 text-[11px] font-semibold text-white"
+          style={{ backgroundColor: "var(--accent)" }}
+        >
+          @{mentions}
+        </span>
+      ) : unread > 0 ? (
+        <span
+          aria-label={`${unread} unread messages in ${channel.name}`}
+          className="shrink-0 rounded-full px-1.5 text-[11px] font-semibold [background-color:var(--surface-1)]"
+        >
+          {unread > 99 ? "99+" : unread}
+        </span>
+      ) : null}
       {canManage ? (
         <DropdownMenu.Root>
           <DropdownMenu.Trigger asChild>
@@ -101,9 +121,11 @@ function ChannelRow({
 export function ChannelSidebar({
   state,
   access,
+  unread,
 }: {
   state: ServerState;
   access: MyAccess | null;
+  unread: Record<string, { unreadCount: number; mentionCount: number }>;
 }): React.JSX.Element {
   const selectedChannelId = useUiStore((state) => state.selectedChannelId);
   const collapsedCategories = useUiStore((state) => state.collapsedCategories);
@@ -140,6 +162,7 @@ export function ChannelSidebar({
       channel={channel}
       selected={channel.id === selectedChannelId}
       canManage={canManage}
+      badge={unread[channel.id]}
       onEdit={() => setDialog({ kind: "channel-edit", channel })}
       onDelete={() => setDialog({ kind: "delete-channel", channel })}
     />

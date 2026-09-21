@@ -20,6 +20,9 @@ export const RECONNECT_BASE_DELAY_MS = 1000 as const;
 export const RECONNECT_MAX_DELAY_MS = 30000 as const;
 export const TYPING_TTL_MS = 5000 as const;
 
+/** @mention token source (server and client compile their own regex). */
+export const MENTION_PATTERN_SOURCE = "@([A-Za-z0-9_.-]{2,32})" as const;
+
 export const ROLE_NAMES = ["owner", "admin", "member"] as const;
 export type RoleName = (typeof ROLE_NAMES)[number];
 

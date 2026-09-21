@@ -1,9 +1,8 @@
 # vitality — self-hosted voice & text for friends
 
-Phase 2: auth (register/login/refresh), invites, roles, servers/channels
-CRUD, WebSocket gateway with presence, and the Discord-like shell UI
-(rail, sidebar, member list, settings). Text chat arrives in Phase 3,
-voice in Phase 4.
+Phase 3: full text chat (ULID history with cursor pagination, sanitized
+markdown, edit/delete, uploads with magic-bytes validation, typing,
+@mentions, unread badges + new-messages divider). Voice arrives in Phase 4.
 
 ## Quick start (full stack)
 

@@ -4,6 +4,7 @@ import {
   integer,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -167,3 +168,78 @@ export type MemberRow = typeof members.$inferSelect;
 export type CategoryRow = typeof channelCategories.$inferSelect;
 export type ChannelRow = typeof channels.$inferSelect;
 export type InviteRow = typeof invites.$inferSelect;
+
+// Text chat (Phase 3). Message ids are ULIDs generated in app code
+// (time-ordered, cursor pagination without offset scans).
+export const messages = pgTable("messages", {
+  id: text("id").primaryKey(),
+  channelId: text("channel_id")
+    .notNull()
+    .references(() => channels.id, { onDelete: "cascade" }),
+  authorId: text("author_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  content: text("content").notNull().default(""),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  editedAt: timestamp("edited_at", { withTimezone: true }),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+});
+
+export const attachments = pgTable("attachments", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => uuidId()),
+  messageId: text("message_id").references(() => messages.id, {
+    onDelete: "cascade",
+  }),
+  channelId: text("channel_id")
+    .notNull()
+    .references(() => channels.id, { onDelete: "cascade" }),
+  uploaderId: text("uploader_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  filename: text("filename").notNull(),
+  mime: text("mime").notNull(),
+  bytes: integer("bytes").notNull(),
+  storageKey: text("storage_key").notNull().unique(),
+  width: integer("width"),
+  height: integer("height"),
+  createdAt: createdAt(),
+});
+
+export const messageMentions = pgTable(
+  "message_mentions",
+  {
+    messageId: text("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.messageId, table.userId] }),
+  ],
+);
+
+export const readStates = pgTable(
+  "read_states",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    channelId: text("channel_id")
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    lastReadMessageId: text("last_read_message_id"),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.channelId] })],
+);
+
+export type MessageRow = typeof messages.$inferSelect;
+export type AttachmentRow = typeof attachments.$inferSelect;

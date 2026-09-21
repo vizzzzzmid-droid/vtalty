@@ -81,3 +81,66 @@ jobs:
       - name: Tear down
         if: always()
         run: docker compose down -v
+
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: vitality
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: vitality
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vitality -d vitality"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @vitality/web exec playwright install chromium --with-deps
+      - run: pnpm --filter @vitality/shared build
+      - run: pnpm --filter @vitality/server build
+      - name: Migrate the database
+        run: pnpm --filter @vitality/server migrate
+        env:
+          DATABASE_URL: postgres://vitality:ci-only-password@127.0.0.1:5432/vitality
+      - name: Start the API
+        run: |
+          DATABASE_URL=postgres://vitality:ci-only-password@127.0.0.1:5432/vitality \
+          JWT_ACCESS_SECRET=ci-access-secret-please-change-me-32plus \
+          UPLOAD_DIR=/tmp/vitality-uploads \
+          PORT=3000 \
+          node apps/server/dist/index.js > /tmp/vitality-server.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:3000/healthz && break
+            sleep 2
+          done
+      - name: Start the web dev server
+        run: |
+          pnpm --filter @vitality/web dev -- --port 5173 --host 127.0.0.1 > /tmp/vitality-web.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:5173/ && break
+            sleep 2
+          done
+      - run: pnpm --filter @vitality/web test:e2e
+      - name: Upload traces and logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts
+          path: |
+            apps/web/playwright-report/
+            apps/web/test-results/
+            /tmp/vitality-server.log
+            /tmp/vitality-web.log

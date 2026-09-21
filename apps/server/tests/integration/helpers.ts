@@ -24,7 +24,10 @@ const describeIf = DATABASE_URL ? describe : describe.skip;
 
 export { describeIf };
 
-export async function setup(): Promise<TestContext> {
+export async function setup(overrides?: {
+  uploadMaxBytes?: number;
+  uploadDir?: string;
+}): Promise<TestContext> {
   const databaseUrl = process.env["DATABASE_URL"];
   if (databaseUrl === undefined) {
     throw new Error("DATABASE_URL is required for integration tests");
@@ -34,6 +37,12 @@ export async function setup(): Promise<TestContext> {
     DATABASE_URL: databaseUrl,
     JWT_ACCESS_SECRET: "integration-secret-32-chars-minimum",
     REGISTRATION_MODE: "invite-only",
+    ...(overrides?.uploadMaxBytes === undefined
+      ? {}
+      : { UPLOAD_MAX_BYTES: String(overrides.uploadMaxBytes) }),
+    ...(overrides?.uploadDir === undefined
+      ? {}
+      : { UPLOAD_DIR: overrides.uploadDir }),
   });
   const db = createDb(databaseUrl);
   await runMigrations(db.db);

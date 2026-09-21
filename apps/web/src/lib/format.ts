@@ -11,3 +11,10 @@ export function initialsOf(name: string): string {
 export function displayNameOf(displayName: string, username: string): string {
   return displayName.trim().length > 0 ? displayName : username;
 }
+
+export function formatMessageTime(iso: string): { time: string; title: string } {
+  const date = new Date(iso);
+  const time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const title = date.toLocaleString();
+  return { time, title };
+}

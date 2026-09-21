@@ -2,12 +2,13 @@ import * as Tooltip from "@radix-ui/react-tooltip";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { Menu, Users } from "lucide-react";
-import { fetchServers, fetchState } from "./api/resources.js";
+import { fetchServers, fetchState, fetchUnread } from "./api/resources.js";
 import { AuthPage } from "./components/AuthPage.js";
 import { ChannelSidebar } from "./components/ChannelSidebar.js";
 import { MainView } from "./components/MainView.js";
 import { MemberList } from "./components/MemberList.js";
 import { ServerRail } from "./components/ServerRail.js";
+import { ChatView } from "./chat/ChatView.js";
 import { SettingsModal } from "./components/SettingsModal.js";
 import { UserPanel } from "./components/UserPanel.js";
 import { myAccess } from "./lib/membership.js";
@@ -62,6 +63,19 @@ function Shell(): React.JSX.Element {
     enabled: activeServerId !== null,
   });
 
+  const unreadQuery = useQuery({
+    queryKey: ["unread", activeServerId],
+    queryFn: () => fetchUnread(activeServerId ?? ""),
+    enabled: activeServerId !== null,
+  });
+  const unreadMap: Record<string, { unreadCount: number; mentionCount: number }> = {};
+  for (const entry of unreadQuery.data ?? []) {
+    unreadMap[entry.channelId] = {
+      unreadCount: entry.unreadCount,
+      mentionCount: entry.mentionCount,
+    };
+  }
+
   if (user === null) {
     return <LoadingScreen />;
   }
@@ -105,7 +119,7 @@ function Shell(): React.JSX.Element {
         <>
           <div className="hidden h-full flex-col md:flex">
             <div className="flex min-h-0 flex-1">
-              <ChannelSidebar state={state} access={access} />
+              <ChannelSidebar state={state} access={access} unread={unreadMap} />
             </div>
             <UserPanel user={user} />
           </div>
@@ -129,7 +143,16 @@ function Shell(): React.JSX.Element {
               </button>
             </div>
             <div className="flex min-h-0 flex-1">
-              <MainView channel={channel} />
+              {channel !== null && channel.type === "text" ? (
+                <ChatView
+                  key={channel.id}
+                  channel={channel}
+                  state={state}
+                  myUserId={user.id}
+                />
+              ) : (
+                <MainView channel={channel} />
+              )}
               <div className="hidden md:flex">
                 <MemberList state={state} myUserId={user.id} />
               </div>
@@ -142,7 +165,7 @@ function Shell(): React.JSX.Element {
         <div className="fixed inset-0 z-30 flex md:hidden" role="dialog" aria-label="Channels">
           <div className="flex h-full flex-col">
             <div className="flex min-h-0 flex-1">
-              <ChannelSidebar state={state} access={access} />
+              <ChannelSidebar state={state} access={access} unread={unreadMap} />
             </div>
             <UserPanel user={user} />
           </div>

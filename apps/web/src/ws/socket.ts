@@ -1,12 +1,14 @@
+import type { InfiniteData } from "@tanstack/react-query";
 import {
   RECONNECT_BASE_DELAY_MS,
   RECONNECT_MAX_DELAY_MS,
   WS_PATH,
   wsEnvelopeSchema,
   wsServerEventSchema,
+  type ChatMessage,
 } from "@vitality/shared";
 import { queryClient } from "../api/queryClient.js";
-import { requestWsTicket } from "../api/resources.js";
+import { requestWsTicket, type HistoryPage } from "../api/resources.js";
 import { usePresenceStore } from "../store/presence.js";
 
 let socket: WebSocket | null = null;
@@ -59,13 +61,92 @@ function handleFrame(raw: string): void {
     case "typing.start":
       applyTyping(event.data.data.channelId, event.data.data.userId);
       break;
+    case "message.create": {
+      const { channelId, message } = event.data.data;
+      queryClient.setQueryData<InfiniteData<HistoryPage>>(
+        ["messages", channelId],
+        (old) => appendMessage(old, message),
+      );
+      void queryClient.invalidateQueries({ queryKey: ["unread"] });
+      break;
+    }
+    case "message.update": {
+      const { channelId, message } = event.data.data;
+      queryClient.setQueryData<InfiniteData<HistoryPage>>(
+        ["messages", channelId],
+        (old) => patchMessage(old, message),
+      );
+      break;
+    }
+    case "message.delete": {
+      const { channelId, messageId } = event.data.data;
+      queryClient.setQueryData<InfiniteData<HistoryPage>>(
+        ["messages", channelId],
+        (old) => dropMessage(old, messageId),
+      );
+      void queryClient.invalidateQueries({ queryKey: ["unread"] });
+      break;
+    }
     default:
-      // Channel/member/category/voice/message events: refetch snapshots.
+      // Channel/member/category/voice events: refetch snapshots.
       // Server-level fan-out is cheap at this scale and always consistent.
       void queryClient.invalidateQueries({ queryKey: ["state"] });
       void queryClient.invalidateQueries({ queryKey: ["servers"] });
       break;
   }
+}
+
+function appendMessage(
+  old: InfiniteData<HistoryPage> | undefined,
+  message: ChatMessage,
+): InfiniteData<HistoryPage> | undefined {
+  if (old === undefined) {
+    return old;
+  }
+  const pages = [...old.pages];
+  const last = pages[pages.length - 1];
+  if (last === undefined) {
+    return old;
+  }
+  if (last.messages.some((entry) => entry.id === message.id)) {
+    return old;
+  }
+  pages[pages.length - 1] = { ...last, messages: [...last.messages, message] };
+  return { ...old, pages };
+}
+
+function patchMessage(
+  old: InfiniteData<HistoryPage> | undefined,
+  message: ChatMessage,
+): InfiniteData<HistoryPage> | undefined {
+  if (old === undefined) {
+    return old;
+  }
+  return {
+    ...old,
+    pages: old.pages.map((page) => ({
+      ...page,
+      messages: page.messages.map((entry) =>
+        entry.id === message.id ? message : entry,
+      ),
+    })),
+  };
+}
+
+function dropMessage(
+  old: InfiniteData<HistoryPage> | undefined,
+  messageId: string,
+): InfiniteData<HistoryPage> | undefined {
+  if (old === undefined) {
+    return old;
+  }
+  return {
+    ...old,
+    pages: old.pages.map((page) => ({
+      ...page,
+      messages: page.messages.filter((entry) => entry.id !== messageId),
+    })),
+  };
 }
 
 function unknownJson(raw: string): unknown {
@@ -103,6 +184,7 @@ async function openSocket(): Promise<void> {
     // Refetch missed state on every (re)connect; live events apply after.
     void queryClient.invalidateQueries({ queryKey: ["state"] });
     void queryClient.invalidateQueries({ queryKey: ["servers"] });
+    void queryClient.invalidateQueries({ queryKey: ["unread"] });
   };
   next.onmessage = (msg) => {
     if (typeof msg.data === "string") {
@@ -121,8 +203,7 @@ async function openSocket(): Promise<void> {
 }
 
 /** Connect the gateway (call after login/boot; uses the stored session). */
-export function connectSocket(): void {
-  running = true;
+export function connectSocket(): void {  running = true;
   attempts = 0;
   if (reconnectTimer !== null) {
     clearTimeout(reconnectTimer);
@@ -148,4 +229,20 @@ export function disconnectSocket(): void {
     old.close();
   }
   usePresenceStore.getState().reset();
+}
+
+const lastTypingSent = new Map<string, number>();
+const TYPING_SEND_COOLDOWN_MS = 2500;
+
+/** Emit a typing intent (client-side throttled; server throttles too). */
+export function sendTyping(channelId: string): void {
+  if (socket === null || socket.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  const now = Date.now();
+  if (now - (lastTypingSent.get(channelId) ?? 0) < TYPING_SEND_COOLDOWN_MS) {
+    return;
+  }
+  lastTypingSent.set(channelId, now);
+  socket.send(JSON.stringify({ type: "typing.start", channelId }));
 }

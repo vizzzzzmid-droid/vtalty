@@ -1,4 +1,4 @@
-.PHONY: dev up down logs ps migrate test-integration
+.PHONY: dev up down logs ps migrate test-integration test-e2e
 
 dev: ## Start postgres+livekit for host development
 	docker compose -f docker-compose.dev.yml up -d
@@ -23,3 +23,6 @@ migrate: ## Run DB migrations against dev postgres (needs DATABASE_URL)
 test-integration: ## Run server integration tests against real Postgres
 	docker compose -f docker-compose.dev.yml up -d postgres
 	pnpm --filter @vitality/server test:integration
+
+test-e2e: ## Run Playwright e2e (needs server :3000 + web :5173 running)
+	pnpm --filter @vitality/web test:e2e

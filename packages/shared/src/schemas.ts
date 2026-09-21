@@ -68,14 +68,26 @@ export const categorySchema = z.object({
   position: z.number().int().nonnegative(),
 });
 
+export const messageAttachmentSchema = z.object({
+  id: z.string().uuid(),
+  filename: z.string().min(1).max(255),
+  mime: z.string().min(1).max(127),
+  size: z.number().int().nonnegative(),
+  url: z.string().min(1).max(2048),
+  width: z.number().int().positive().nullable(),
+  height: z.number().int().positive().nullable(),
+});
+
 export const messageSchema = z.object({
   id: messageIdSchema,
   channelId: channelIdSchema,
   authorId: userIdSchema,
-  content: z.string().min(1).max(MAX_MESSAGE_LENGTH),
+  content: z.string().min(0).max(MAX_MESSAGE_LENGTH),
   createdAt: z.string().datetime(),
   editedAt: z.string().datetime().nullable(),
   deletedAt: z.string().datetime().nullable(),
+  attachments: z.array(messageAttachmentSchema).default([]),
+  mentions: z.array(userIdSchema).default([]),
 });
 
 export const presenceSchema = z.object({
@@ -98,6 +110,7 @@ export type Channel = z.infer<typeof channelSchema>;
 export type Category = z.infer<typeof categorySchema>;
 export type ChatMessage = z.infer<typeof messageSchema>;
 export type Presence = z.infer<typeof presenceSchema>;
+export type MessageAttachment = z.infer<typeof messageAttachmentSchema>;
 export type VoiceParticipant = z.infer<typeof voiceParticipantSchema>;
 
 // REST request/response DTOs (validated on the server, reused by web forms).
@@ -180,6 +193,40 @@ export const wsTicketResponseSchema = z.object({
   ticket: z.string().min(1).max(256),
 });
 export type WsTicketResponse = z.infer<typeof wsTicketResponseSchema>;
+
+// Text chat DTOs (Phase 3).
+
+export const createMessageBodySchema = z.object({
+  // Empty content is allowed only when attachments are present (checked in service).
+  content: z.string().max(MAX_MESSAGE_LENGTH).default(""),
+  attachmentIds: z.array(z.string().uuid()).max(10).optional(),
+});
+
+export const patchMessageBodySchema = z.object({
+  content: z.string().min(1).max(MAX_MESSAGE_LENGTH),
+});
+
+export const historyQuerySchema = z.object({
+  before: messageIdSchema.optional(),
+  after: messageIdSchema.optional(),
+  around: messageIdSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+
+export const markReadBodySchema = z.object({
+  lastReadMessageId: messageIdSchema,
+});
+
+export const unreadEntrySchema = z.object({
+  channelId: channelIdSchema,
+  unreadCount: z.number().int().nonnegative(),
+  mentionCount: z.number().int().nonnegative(),
+  latestMessageId: messageIdSchema.nullable(),
+});
+
+export type CreateMessageBody = z.infer<typeof createMessageBodySchema>;
+export type HistoryQuery = z.infer<typeof historyQuerySchema>;
+export type UnreadEntry = z.infer<typeof unreadEntrySchema>;
 
 export type RegisterBody = z.infer<typeof registerBodySchema>;
 export type LoginBody = z.infer<typeof loginBodySchema>;
