@@ -20,6 +20,7 @@ const supportsOutputSelection =
 export function VoiceAudioTab(): React.JSX.Element {
   const settings = useVoiceSettings();
   const needsAudioGesture = useVoiceConnection((state) => state.needsAudioGesture);
+  const audioNotice = useVoiceConnection((state) => state.audioNotice);
   const [inputs, setInputs] = useState<MediaDeviceInfo[]>([]);
   const [outputs, setOutputs] = useState<MediaDeviceInfo[]>([]);
   const [meter, setMeter] = useState(0);
@@ -82,6 +83,9 @@ export function VoiceAudioTab(): React.JSX.Element {
         echoCancellation: settings.echoCancellation,
         autoGainControl: settings.autoGainControl,
         inputVolume: settings.inputVolume,
+        gateEnabled: settings.gateEnabled,
+        gateThresholdDb: settings.gateThresholdDb,
+        loopback: settings.hearMyself,
       });
       chainRef.current = chain;
       setTesting(true);
@@ -104,8 +108,19 @@ export function VoiceAudioTab(): React.JSX.Element {
     }
   };
 
+  const applyLiveChange = (): void => {
+    void rebuildMicChain()
+      .then(() => setError(null))
+      .catch(() => setError("Could not apply the new mode while connected."));
+  };
+
   return (
     <div className="flex flex-col gap-4">
+      {audioNotice === null ? null : (
+        <p role="status" className="rounded px-3 py-2 text-xs [background-color:var(--surface-3)]">
+          {audioNotice}
+        </p>
+      )}
       {needsAudioGesture ? (
         <button
           type="button"
@@ -190,7 +205,10 @@ export function VoiceAudioTab(): React.JSX.Element {
               type="radio"
               name="noise-mode"
               checked={settings.noiseMode === "off"}
-              onChange={() => settings.set({ noiseMode: "off" })}
+              onChange={() => {
+                settings.set({ noiseMode: "off" });
+                applyLiveChange();
+              }}
             />
             Off — raw microphone
           </label>
@@ -199,13 +217,24 @@ export function VoiceAudioTab(): React.JSX.Element {
               type="radio"
               name="noise-mode"
               checked={settings.noiseMode === "standard"}
-              onChange={() => settings.set({ noiseMode: "standard" })}
+              onChange={() => {
+                settings.set({ noiseMode: "standard" });
+                applyLiveChange();
+              }}
             />
             Standard — browser processing (toggles below)
           </label>
-          <label className="flex items-center gap-2 opacity-60">
-            <input type="radio" name="noise-mode" disabled />
-            Enhanced (RNNoise) — arrives in Phase 5
+          <label className="flex items-center gap-2">
+            <input
+              type="radio"
+              name="noise-mode"
+              checked={settings.noiseMode === "enhanced"}
+              onChange={() => {
+                settings.set({ noiseMode: "enhanced" });
+                applyLiveChange();
+              }}
+            />
+            Enhanced — RNNoise neural suppression (48 kHz, heavier CPU)
           </label>
         </div>
       </fieldset>
@@ -230,6 +259,41 @@ export function VoiceAudioTab(): React.JSX.Element {
         </div>
       ) : null}
 
+      <fieldset>
+        <legend className="mb-1 text-xs font-semibold uppercase tracking-wide [color:var(--text-muted)]">
+          Noise gate (optional, works in every mode)
+        </legend>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={settings.gateEnabled}
+            onChange={(event) => {
+              settings.set({ gateEnabled: event.target.checked });
+              applyLiveChange();
+            }}
+          />
+          Gate silence below the threshold
+        </label>
+        {settings.gateEnabled ? (
+          <Field label={`Gate threshold — ${settings.gateThresholdDb} dB`}>
+            <input
+              aria-label="Gate threshold"
+              type="range"
+              min={-60}
+              max={-10}
+              value={settings.gateThresholdDb}
+              onChange={(event) => {
+                settings.set({ gateThresholdDb: Number(event.target.value) });
+              }}
+              // Rebuilding the chain per tick would flap the mic: apply on release.
+              onPointerUp={() => applyLiveChange()}
+              onBlur={() => applyLiveChange()}
+              className="w-full"
+            />
+          </Field>
+        ) : null}
+      </fieldset>
+
       <Field label={`Input volume — ${Math.round(settings.inputVolume * 100)}%`}>
         <input
           aria-label="Input volume"
@@ -250,6 +314,14 @@ export function VoiceAudioTab(): React.JSX.Element {
         >
           {testing ? "Stop mic test" : "Test microphone"}
         </button>
+        <label className="mt-2 flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={settings.hearMyself}
+            onChange={(event) => settings.set({ hearMyself: event.target.checked })}
+          />
+          Hear myself (loopback — wear headphones to avoid feedback)
+        </label>
         <div
           role="meter"
           aria-label="Microphone level"

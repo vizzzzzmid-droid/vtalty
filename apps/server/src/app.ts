@@ -8,6 +8,7 @@ import { ZodError } from "zod";
 import type { Db } from "./db/client.js";
 import type { Env } from "./env.js";
 import { HttpError } from "./lib/errors.js";
+import { contentSecurityPolicyDirectives } from "./lib/csp.js";
 import { createLiveKit, type LiveKitAdmin } from "./lib/livekit.js";
 import { loggerOptions } from "./lib/logger.js";
 import { registerAuthRoutes } from "./modules/auth/routes.js";
@@ -17,6 +18,7 @@ import { registerMemberRoutes } from "./modules/members/routes.js";
 import { registerMessageRoutes } from "./modules/messages/routes.js";
 import { registerRoleRoutes } from "./modules/roles/routes.js";
 import { registerServerRoutes } from "./modules/servers/routes.js";
+import { registerSettingsRoutes } from "./modules/settings/routes.js";
 import { registerUserRoutes } from "./modules/users/routes.js";
 import { registerVoiceRoutes } from "./modules/voice/routes.js";
 import { LocalStorage, type UploadStorage } from "./modules/uploads/storage.js";
@@ -75,7 +77,9 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       .send({ error: { code: "INTERNAL_ERROR", message: "Internal server error" } });
   });
 
-  await app.register(helmet);
+  await app.register(helmet, {
+    contentSecurityPolicy: { directives: contentSecurityPolicyDirectives() },
+  });
   // Same-origin in production (Caddy). Reflect origin for host-run dev
   // (Vite :5173 -> server :3000); an explicit allowlist is a later hardening.
   await app.register(cors, { origin: true });
@@ -109,6 +113,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   registerMessageRoutes(app, deps);
   registerUploadRoutes(app, { ...deps, storage });
   registerRoleRoutes(app, deps);
+  registerSettingsRoutes(app, deps);
   registerVoiceRoutes(app, deps);
   registerWsTicketRoutes(app, deps);
   await registerGateway(app, deps);

@@ -147,6 +147,15 @@ function ParticipantRow({
       </span>
       <span className="min-w-0 flex-1 truncate text-sm">{name}</span>
       {participant.sharingScreen ? (
+        <span
+          aria-label={`${name} is sharing live`}
+          className="shrink-0 rounded px-1 py-px text-[10px] font-bold text-white"
+          style={{ backgroundColor: "#ed4245" }}
+        >
+          LIVE
+        </span>
+      ) : null}
+      {participant.sharingScreen ? (
         <span aria-label={`${name} is sharing their screen`} role="img">
           <MonitorUp size={14} aria-hidden="true" className="[color:var(--text-muted)]" />
         </span>

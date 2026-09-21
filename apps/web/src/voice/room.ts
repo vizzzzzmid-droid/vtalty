@@ -6,11 +6,13 @@ import {
   type Participant,
   type RemoteParticipant,
   type RemoteTrackPublication,
+  type TrackPublication,
 } from "livekit-client";
 import { ApiError } from "../api/http.js";
 import { requestVoiceToken } from "../api/resources.js";
 import { sendVoiceFlags } from "../ws/socket.js";
 import { buildMicChain, type MicChain } from "./chain.js";
+import { EnhancedUnavailableError } from "./rnnoise.js";
 import { useVoiceConnection } from "./store.js";
 import { useVoiceSettings } from "./settings.js";
 import { voiceSounds } from "./sounds.js";
@@ -22,6 +24,12 @@ let micPublication: LocalTrackPublication | null = null;
 let intentionalDisconnect = false;
 let qualityTimer: ReturnType<typeof setInterval> | null = null;
 let lastAnnounced = "";
+let suppressShareNotice = false;
+
+/** Suppress the "stream stopped remotely" notice around our own stops. */
+export function setSuppressShareNotice(value: boolean): void {
+  suppressShareNotice = value;
+}
 const attached: [RoomEvent, (...args: never[]) => void][] = [];
 
 function snapshot() {
@@ -61,6 +69,12 @@ function applyDeafenSubscriptions(deafened: boolean): void {
   for (const participant of room.remoteParticipants.values()) {
     for (const publication of participant.audioTrackPublications.values()) {
       (publication as RemoteTrackPublication).setSubscribed(!deafened);
+    }
+    // Deafen also silences screen-share audio (never the video).
+    for (const publication of participant.trackPublications.values()) {
+      if (publication.source === Track.Source.ScreenShareAudio) {
+        (publication as RemoteTrackPublication).setSubscribed(!deafened);
+      }
     }
   }
 }
@@ -161,11 +175,26 @@ function attachHandlers(next: Room): void {
     next,
     RoomEvent.TrackSubscribed,
     (track: Track, _publication: unknown, participant: Participant) => {
-      if (snapshot().selfDeafened && track.kind === Track.Kind.Audio) {
-        (_publication as RemoteTrackPublication).setSubscribed(false);
+      const publication = _publication as RemoteTrackPublication;
+      const watching = snapshot().watching[participant.identity] !== undefined;
+      const isScreenVideo =
+        track.kind === Track.Kind.Video &&
+        publication.source === Track.Source.ScreenShare;
+      const isScreenAudio =
+        track.kind === Track.Kind.Audio &&
+        publication.source === Track.Source.ScreenShareAudio;
+      // Screen tracks are opt-in: anything not actively watched is
+      // unsubscribed immediately (saves VPS/client bandwidth).
+      if ((isScreenVideo || isScreenAudio) && !watching) {
+        publication.setSubscribed(false);
+        return;
+      }
+      if (track.kind === Track.Kind.Audio && snapshot().selfDeafened) {
+        publication.setSubscribed(false);
+        return;
       }
       const volume = useVoiceSettings.getState().userVolumes[participant.identity];
-      if (volume !== undefined) {
+      if (volume !== undefined && !isScreenAudio) {
         (participant as RemoteParticipant).setVolume(volume);
       }
     },
@@ -173,6 +202,56 @@ function attachHandlers(next: Room): void {
   on(next, RoomEvent.AudioPlaybackStatusChanged, (playing: boolean) => {
     snapshot().set({ needsAudioGesture: !playing });
   });
+  on(
+    next,
+    RoomEvent.TrackMuted,
+    (track: Track, publication: TrackPublication, participant: Participant) => {
+      void track;
+      if (
+        participant.isLocal &&
+        publication.source === Track.Source.ScreenShare &&
+        !suppressShareNotice
+      ) {
+        snapshot().set({
+          shareNotice:
+            "Your stream was stopped (sharer limit or moderator). Re-share to try again.",
+        });
+      }
+    },
+  );
+}
+
+function chainOptionsFromPrefs(): Parameters<typeof buildMicChain>[0] {
+  const prefs = useVoiceSettings.getState();
+  return {
+    deviceId: prefs.inputDeviceId,
+    noiseMode: prefs.noiseMode,
+    noiseSuppression: prefs.noiseSuppression,
+    echoCancellation: prefs.echoCancellation,
+    autoGainControl: prefs.autoGainControl,
+    inputVolume: prefs.inputVolume,
+    gateEnabled: prefs.gateEnabled,
+    gateThresholdDb: prefs.gateThresholdDb,
+    loopback: prefs.hearMyself,
+  };
+}
+
+/** Build the configured chain, falling back Standard on Enhanced failure. */
+async function buildMicChainWithFallback(): Promise<MicChain> {
+  const prefs = useVoiceSettings.getState();
+  try {
+    return await buildMicChain(chainOptionsFromPrefs());
+  } catch (err) {
+    if (prefs.noiseMode === "enhanced" && err instanceof EnhancedUnavailableError) {
+      prefs.set({ noiseMode: "standard" });
+      snapshot().set({
+        audioNotice:
+          "Enhanced suppression is unavailable here (needs 48 kHz audio + WebAudio worklets + WASM); fell back to Standard.",
+      });
+      return buildMicChain(chainOptionsFromPrefs());
+    }
+    throw err;
+  }
 }
 
 function describeJoinError(err: unknown): string {
@@ -213,6 +292,7 @@ async function teardownRoom(): Promise<void> {
   const current = room;
   room = null;
   micPublication = null;
+  snapshot().set({ sharing: null, shareNotice: null });
   if (current !== null) {
     detachAll(current);
     try {
@@ -229,6 +309,11 @@ async function teardownRoom(): Promise<void> {
 
 export function isVoiceConnected(): boolean {
   return room !== null && snapshot().status === "connected";
+}
+
+/** Raw room access for the screen-share module (null when disconnected). */
+export function getRoom(): Room | null {
+  return room;
 }
 
 export function currentVoiceChannel(): string | null {
@@ -252,17 +337,9 @@ export async function joinVoiceChannel(channelId: string): Promise<void> {
   try {
     const invitation = await requestVoiceToken(channelId);
     // Build the mic chain BEFORE connecting: device errors then fail fast
-    // without a ghost join, and the chain shape is Phase 5-ready (RNNoise
-    // will slot in before the gain node).
-    const prefs = useVoiceSettings.getState();
-    const mic = await buildMicChain({
-      deviceId: prefs.inputDeviceId,
-      noiseMode: prefs.noiseMode,
-      noiseSuppression: prefs.noiseSuppression,
-      echoCancellation: prefs.echoCancellation,
-      autoGainControl: prefs.autoGainControl,
-      inputVolume: prefs.inputVolume,
-    });
+    // without a ghost join. Enhanced mode falls back to Standard when the
+    // browser cannot do 48 kHz / AudioWorklet / WASM.
+    const mic = await buildMicChainWithFallback();
     chain = mic;
     const next = new Room({ adaptiveStream: true, dynacast: true });
     room = next;
@@ -302,6 +379,7 @@ export async function leaveVoiceChannel(): Promise<void> {
     error: null,
     speakingIds: [],
     pttActive: false,
+    watching: {},
   });
   voiceSounds.leave();
 }
@@ -358,15 +436,9 @@ export async function rebuildMicChain(): Promise<void> {
   if (room === null || chain === null) {
     return;
   }
-  const prefs = useVoiceSettings.getState();
-  const fresh = await buildMicChain({
-    deviceId: prefs.inputDeviceId,
-    noiseMode: prefs.noiseMode,
-    noiseSuppression: prefs.noiseSuppression,
-    echoCancellation: prefs.echoCancellation,
-    autoGainControl: prefs.autoGainControl,
-    inputVolume: prefs.inputVolume,
-  });
+  // Mute state lives on the MediaStreamTrack; the new chain starts enabled
+  // and applyMicGate() below restores the current gate afterwards.
+  const fresh = await buildMicChainWithFallback();
   const previous = chain;
   const previousPublication = micPublication;
   chain = fresh;

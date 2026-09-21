@@ -123,6 +123,43 @@ export const voiceStopShareBodySchema = z.object({
   userId: userIdSchema,
 });
 
+// Voice & Audio settings (Phase 5). Persisted locally + on the server
+// (server copy wins at boot so settings follow the user across devices).
+// Nothing sensitive is stored: device ids only select local hardware.
+export const voiceSettingsSchema = z.object({
+  noiseMode: z.enum(["off", "standard", "enhanced"]),
+  noiseSuppression: z.boolean(),
+  echoCancellation: z.boolean(),
+  autoGainControl: z.boolean(),
+  gateEnabled: z.boolean(),
+  gateThresholdDb: z.number().min(-60).max(-10),
+  hearMyself: z.boolean(),
+  inputVolume: z.number().min(0).max(2),
+  inputDeviceId: z.string().max(256).nullable(),
+  outputDeviceId: z.string().max(256).nullable(),
+  pttEnabled: z.boolean(),
+  pttKey: z.string().min(1).max(32),
+});
+
+export const voiceSettingsPatchSchema = voiceSettingsSchema.partial();
+
+export const VOICE_SETTINGS_DEFAULTS: z.infer<typeof voiceSettingsSchema> = {
+  noiseMode: "standard",
+  noiseSuppression: true,
+  echoCancellation: true,
+  autoGainControl: true,
+  gateEnabled: false,
+  gateThresholdDb: -40,
+  hearMyself: false,
+  inputVolume: 1,
+  inputDeviceId: null,
+  outputDeviceId: null,
+  pttEnabled: false,
+  pttKey: "Backquote",
+};
+
+export type VoiceSettings = z.infer<typeof voiceSettingsSchema>;
+
 export type User = z.infer<typeof userSchema>;
 export type Role = z.infer<typeof roleSchema>;
 export type RoleFlags = z.infer<typeof roleFlagsSchema>;

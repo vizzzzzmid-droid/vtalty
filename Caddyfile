@@ -48,4 +48,10 @@
 	handle {
 		reverse_proxy web:80
 	}
+
+	# Minimal CSP for the static SPA. `wasm-unsafe-eval` is required for
+	# WebAssembly.compile (RNNoise Enhanced mode); `worker-src` covers the
+	# AudioWorklet module. Scoped to site responses only (never to
+	# /livekit/* or /api/*, which carry no HTML).
+	header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' wss: https:; img-src 'self' data: blob:; media-src 'self' blob: data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'"
 }

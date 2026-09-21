@@ -2,6 +2,8 @@ import { create } from "zustand";
 import type { LoginBody, RegisterBody, User } from "@vitality/shared";
 import { login, logoutServer, register } from "../api/resources.js";
 import { setAccessToken, setRefreshHandler } from "../api/http.js";
+import { startSettingsSync, stopSettingsSync } from "../voice/settings-sync.js";
+import { leaveVoiceChannel } from "../voice/room.js";
 import { connectSocket, disconnectSocket } from "../ws/socket.js";
 
 type SessionStatus = "loading" | "authed" | "guest";
@@ -20,11 +22,14 @@ function applyAuth(user: User, token: string): void {
   setAccessToken(token);
   useSessionStore.setState({ user, accessToken: token, status: "authed" });
   connectSocket();
+  startSettingsSync(user.id);
 }
 
 function applyGuest(): void {
   setAccessToken(null);
   disconnectSocket();
+  stopSettingsSync();
+  void leaveVoiceChannel();
   useSessionStore.setState({ user: null, accessToken: null, status: "guest" });
 }
 

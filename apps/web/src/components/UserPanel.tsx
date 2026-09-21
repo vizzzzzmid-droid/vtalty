@@ -1,4 +1,5 @@
-import { Headphones, Mic, MicOff, PhoneOff, Settings } from "lucide-react";
+import { useState } from "react";
+import { Headphones, Mic, MicOff, MonitorOff, MonitorUp, PhoneOff, Settings } from "lucide-react";
 import type { User } from "@vitality/shared";
 import { displayNameOf } from "../lib/format.js";
 import { useUiStore } from "../store/ui.js";
@@ -8,21 +9,28 @@ import {
   setSelfDeafened,
   setSelfMuted,
 } from "../voice/room.js";
+import { stopShare } from "../voice/screen.js";
 import { qualityDots, useVoiceConnection } from "../voice/store.js";
 import { Avatar } from "./Avatar.js";
+import { ScreenShareDialog } from "./ScreenShareDialog.js";
 import { Tip } from "./ui.js";
 
 function ConnectionBox({
   channelId,
   channelName,
+  canShareScreen,
 }: {
   channelId: string;
   channelName: string;
+  canShareScreen: boolean;
 }): React.JSX.Element {
   const status = useVoiceConnection((state) => state.status);
   const error = useVoiceConnection((state) => state.error);
   const quality = useVoiceConnection((state) => state.connectionQuality);
+  const sharing = useVoiceConnection((state) => state.sharing);
+  const shareNotice = useVoiceConnection((state) => state.shareNotice);
   const dots = qualityDots(quality);
+  const [shareOpen, setShareOpen] = useState(false);
 
   return (
     <div className="border-t border-black/20 px-2 py-2 [background-color:var(--surface-1)]">
@@ -45,6 +53,11 @@ function ConnectionBox({
           </button>
         </div>
       ) : null}
+      {shareNotice === null ? null : (
+        <p role="status" className="px-1 pb-1 text-xs text-amber-400">
+          {shareNotice}
+        </p>
+      )}
       <div className="flex items-center gap-2">
         <span
           role="img"
@@ -67,6 +80,32 @@ function ConnectionBox({
         <span className="min-w-0 flex-1 truncate text-xs font-medium">
           {channelName}
         </span>
+        {canShareScreen ? (
+          sharing !== null ? (
+            <Tip label="Stop sharing" side="top">
+              <button
+                type="button"
+                aria-label="Stop sharing"
+                aria-pressed="true"
+                onClick={() => void stopShare()}
+                className="rounded p-1.5 text-red-400 hover:[background-color:var(--surface-3)]"
+              >
+                <MonitorOff size={16} aria-hidden="true" />
+              </button>
+            </Tip>
+          ) : (
+            <Tip label="Share screen" side="top">
+              <button
+                type="button"
+                aria-label="Share screen"
+                onClick={() => setShareOpen(true)}
+                className="rounded p-1.5 [color:var(--text-muted)] hover:[background-color:var(--surface-3)] hover:[color:var(--text-primary)]"
+              >
+                <MonitorUp size={16} aria-hidden="true" />
+              </button>
+            </Tip>
+          )
+        ) : null}
         <Tip label="Disconnect from voice" side="top">
           <button
             type="button"
@@ -78,6 +117,12 @@ function ConnectionBox({
           </button>
         </Tip>
       </div>
+      <ScreenShareDialog
+        open={shareOpen}
+        channelId={channelId}
+        canShare={canShareScreen}
+        onClose={() => setShareOpen(false)}
+      />
     </div>
   );
 }
@@ -86,10 +131,12 @@ export function UserPanel({
   user,
   channelId,
   channelName,
+  canShareScreen,
 }: {
   user: User;
   channelId: string | null;
   channelName: string | null;
+  canShareScreen: boolean;
 }): React.JSX.Element {
   const setSettings = useUiStore((state) => state.setSettings);
   const selfMuted = useVoiceConnection((state) => state.selfMuted);
@@ -101,7 +148,11 @@ export function UserPanel({
   return (
     <div className="shrink-0 [background-color:var(--surface-1)]">
       {connected && channelId !== null && channelName !== null ? (
-        <ConnectionBox channelId={channelId} channelName={channelName} />
+        <ConnectionBox
+          channelId={channelId}
+          channelName={channelName}
+          canShareScreen={canShareScreen}
+        />
       ) : null}
       <div className="flex h-[52px] items-center gap-1 px-2">
         <Avatar name={name} src={user.avatarUrl} size={32} />

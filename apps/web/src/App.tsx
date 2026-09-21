@@ -178,7 +178,12 @@ function Shell(): React.JSX.Element {
                 myUserId={user.id}
               />
             </div>
-            <UserPanel user={user} channelId={voiceChannelId} channelName={voiceChannelName} />
+            <UserPanel
+              user={user}
+              channelId={voiceChannelId}
+              channelName={voiceChannelName}
+              canShareScreen={access?.canShareScreen === true}
+            />
           </div>
           <div className="flex min-w-0 flex-1 flex-col">
             {needsAudioGesture ? (
@@ -221,7 +226,7 @@ function Shell(): React.JSX.Element {
                   myUserId={user.id}
                 />
               ) : (
-                <MainView channel={channel} />
+                <MainView channel={channel} state={state} />
               )}
               <div className="hidden md:flex">
                 <MemberList state={state} myUserId={user.id} />
@@ -242,7 +247,12 @@ function Shell(): React.JSX.Element {
                 myUserId={user.id}
               />
             </div>
-            <UserPanel user={user} channelId={voiceChannelId} channelName={voiceChannelName} />
+            <UserPanel
+              user={user}
+              channelId={voiceChannelId}
+              channelName={voiceChannelName}
+              canShareScreen={access?.canShareScreen === true}
+            />
           </div>
           <button
             type="button"

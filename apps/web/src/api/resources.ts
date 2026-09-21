@@ -19,9 +19,10 @@ import {
   type ServerState,
   type UnreadEntry,
   type User,
+  type VoiceSettings,
   type VoiceTokenResponse,
 } from "@vitality/shared";
-import { del, ensureFreshSession, get, getAccessToken, patch, post } from "./http.js";
+import { del, ensureFreshSession, get, getAccessToken, patch, post, request } from "./http.js";
 import { ApiError } from "./http.js";
 
 export interface ServerSummary {
@@ -78,6 +79,20 @@ export function patchMe(patchBody: {
   avatarUrl?: string | null;
 }): Promise<User> {
   return patch<User>("/users/me", patchBody);
+}
+
+/** Server-side Voice & Audio settings (follow the user across devices). */
+export function fetchVoiceSettings(): Promise<VoiceSettings> {
+  return get<VoiceSettings>("/users/me/voice-settings");
+}
+
+export function putVoiceSettings(
+  patch: Partial<VoiceSettings>,
+): Promise<VoiceSettings> {
+  return request<VoiceSettings>("/users/me/voice-settings", {
+    method: "PUT",
+    body: JSON.stringify(patch),
+  });
 }
 
 export function fetchServers(): Promise<ServerSummary[]> {

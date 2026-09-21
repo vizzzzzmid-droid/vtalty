@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   boolean,
   integer,
+  jsonb,
   pgEnum,
   pgTable,
   primaryKey,
@@ -243,3 +244,15 @@ export const readStates = pgTable(
 
 export type MessageRow = typeof messages.$inferSelect;
 export type AttachmentRow = typeof attachments.$inferSelect;
+
+// Per-user Voice & Audio settings (Phase 5). Local storage stays the
+// immediate source; this copy follows the user across devices.
+export const userVoiceSettings = pgTable("user_voice_settings", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  settings: jsonb("settings").notNull().default({}),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
