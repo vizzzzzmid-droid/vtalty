@@ -152,19 +152,13 @@ function ParticipantRow({
         </span>
       ) : null}
       {participant.deafened ? (
-        <Headphones
-          size={14}
-          aria-hidden="true"
-          aria-label={`${name} is deafened`}
-          className="shrink-0 text-red-400"
-        />
+        <span role="img" aria-label={`${name} is deafened`} className="shrink-0 text-red-400">
+          <Headphones size={14} aria-hidden="true" />
+        </span>
       ) : participant.muted || participant.serverMuted ? (
-        <MicOff
-          size={14}
-          aria-hidden="true"
-          aria-label={`${name} is muted`}
-          className="shrink-0 text-red-400"
-        />
+        <span role="img" aria-label={`${name} is muted`} className="shrink-0 text-red-400">
+          <MicOff size={14} aria-hidden="true" />
+        </span>
       ) : null}
     </span>
   );

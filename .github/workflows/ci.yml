@@ -144,3 +144,96 @@ jobs:
             apps/web/test-results/
             /tmp/vitality-server.log
             /tmp/vitality-web.log
+
+  # Experimental voice e2e: real LiveKit SFU + fake Chromium media devices.
+  # NOT required (continue-on-error): media/ICE behavior was never verified
+  # on a machine without Docker, so this job proves the flow in CI without
+  # blocking merges. Promote to required once it is green twice in a row.
+  # If it stays red, the documented manual scenario (docs/MANUAL_TESTS.md)
+  # remains the acceptance bar for voice.
+  e2e-voice:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: vitality
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: vitality
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vitality -d vitality"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      livekit:
+        image: livekit/livekit-server:v1.13
+        ports:
+          - 7880:7880
+          - 7881:7881
+          - 7882:7882/udp
+        env:
+          LIVEKIT_CONFIG: |
+            port: 7880
+            log_level: info
+            bind_addresses: ["0.0.0.0"]
+            rtc:
+              tcp_port: 7881
+              udp_port: 7882
+              use_external_ip: false
+            keys:
+              devkey: ci-livekit-secret-please-change-me-32plus
+            room:
+              auto_create: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @vitality/web exec playwright install chromium --with-deps
+      - run: pnpm --filter @vitality/shared build
+      - run: pnpm --filter @vitality/server build
+      - name: Migrate the database
+        run: pnpm --filter @vitality/server migrate
+        env:
+          DATABASE_URL: postgres://vitality:ci-only-password@127.0.0.1:5432/vitality
+      - name: Start the API (LiveKit on localhost, public URL ws://)
+        run: |
+          DATABASE_URL=postgres://vitality:ci-only-password@127.0.0.1:5432/vitality \
+          JWT_ACCESS_SECRET=ci-access-secret-please-change-me-32plus \
+          UPLOAD_DIR=/tmp/vitality-uploads \
+          LIVEKIT_URL=http://127.0.0.1:7880 \
+          LIVEKIT_API_KEY=devkey \
+          LIVEKIT_API_SECRET=ci-livekit-secret-please-change-me-32plus \
+          LIVEKIT_PUBLIC_URL=ws://127.0.0.1:7880 \
+          PORT=3000 \
+          node apps/server/dist/index.js > /tmp/vitality-server.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:3000/healthz && break
+            sleep 2
+          done
+      - name: Start the web dev server
+        run: |
+          pnpm --filter @vitality/web dev -- --port 5173 --host 127.0.0.1 > /tmp/vitality-web.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:5173/ && break
+            sleep 2
+          done
+      - run: pnpm --filter @vitality/web test:e2e-voice
+      - name: Upload traces and logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-voice-artifacts
+          path: |
+            apps/web/playwright-report/
+            apps/web/test-results/
+            /tmp/vitality-server.log
+            /tmp/vitality-web.log
