@@ -1,22 +1,35 @@
-import {
+import type {
   ConnectionState,
+  Participant,
+  RemoteParticipant,
+  RemoteTrackPublication,
   Room,
   RoomEvent,
   Track,
-  type Participant,
-  type RemoteParticipant,
-  type RemoteTrackPublication,
-  type TrackPublication,
+  TrackPublication,
+  LocalTrackPublication,
 } from "livekit-client";
 import { ApiError } from "../api/http.js";
 import { requestVoiceToken } from "../api/resources.js";
 import { sendVoiceFlags } from "../ws/socket.js";
 import { buildMicChain, type MicChain } from "./chain.js";
 import { EnhancedUnavailableError } from "./rnnoise.js";
+import type { VoiceQuality } from "./store.js";
 import { useVoiceConnection } from "./store.js";
 import { useVoiceSettings } from "./settings.js";
 import { voiceSounds } from "./sounds.js";
-import type { LocalTrackPublication } from "livekit-client";
+
+type LiveKitModule = typeof import("livekit-client");
+
+let livekitModule: LiveKitModule | null = null;
+
+/** Lazily load livekit-client (split out of the initial bundle). */
+async function livekit(): Promise<LiveKitModule> {
+  if (livekitModule === null) {
+    livekitModule = await import("livekit-client");
+  }
+  return livekitModule;
+}
 
 let room: Room | null = null;
 let chain: MicChain | null = null;
@@ -71,8 +84,10 @@ function applyDeafenSubscriptions(deafened: boolean): void {
       (publication as RemoteTrackPublication).setSubscribed(!deafened);
     }
     // Deafen also silences screen-share audio (never the video).
+    // String literal keeps livekit-client out of the initial chunk
+    // (value matches Track.Source.ScreenShareAudio, verified in types).
     for (const publication of participant.trackPublications.values()) {
-      if (publication.source === Track.Source.ScreenShareAudio) {
+      if ((publication as { source?: unknown }).source === "screen_share_audio") {
         (publication as RemoteTrackPublication).setSubscribed(!deafened);
       }
     }
@@ -107,7 +122,16 @@ function sampleQuality(): void {
   if (room === null) {
     return;
   }
-  snapshot().set({ connectionQuality: room.localParticipant.connectionQuality });
+  snapshot().set({ connectionQuality: toVoiceQuality(room.localParticipant.connectionQuality) });
+}
+
+function toVoiceQuality(value: string): VoiceQuality {
+  return value === "excellent" ||
+    value === "good" ||
+    value === "poor" ||
+    value === "lost"
+    ? value
+    : "unknown";
 }
 
 function startQualityTimer(): void {
@@ -142,54 +166,54 @@ function detachAll(target: Room): void {
   }
 }
 
-function attachHandlers(next: Room): void {
-  on(next, RoomEvent.ConnectionStateChanged, (connState: ConnectionState) => {
+function attachHandlers(next: Room, LK: LiveKitModule): void {
+  on(next, LK.RoomEvent.ConnectionStateChanged, (connState: ConnectionState) => {
     const s = snapshot();
-    if (connState === ConnectionState.Connected) {
+    if (connState === LK.ConnectionState.Connected) {
       s.set({ status: "connected", error: null });
       sampleQuality();
       announce();
     } else if (
-      connState === ConnectionState.Reconnecting ||
-      connState === ConnectionState.SignalReconnecting
+      connState === LK.ConnectionState.Reconnecting ||
+      connState === LK.ConnectionState.SignalReconnecting
     ) {
       s.set({ status: "reconnecting" });
-    } else if (connState === ConnectionState.Disconnected && !intentionalDisconnect) {
+    } else if (connState === LK.ConnectionState.Disconnected && !intentionalDisconnect) {
       s.set({ status: "failed", error: "Voice connection lost. Rejoin to try again." });
     }
   });
-  on(next, RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
+  on(next, LK.RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
     snapshot().set({ speakingIds: speakers.map((speaker) => speaker.identity) });
   });
-  on(next, RoomEvent.ParticipantConnected, () => {
+  on(next, LK.RoomEvent.ParticipantConnected, () => {
     if (snapshot().status === "connected") {
       voiceSounds.join();
     }
   });
-  on(next, RoomEvent.ParticipantDisconnected, () => {
+  on(next, LK.RoomEvent.ParticipantDisconnected, () => {
     if (snapshot().status === "connected") {
       voiceSounds.leave();
     }
   });
   on(
     next,
-    RoomEvent.TrackSubscribed,
+    LK.RoomEvent.TrackSubscribed,
     (track: Track, _publication: unknown, participant: Participant) => {
       const publication = _publication as RemoteTrackPublication;
       const watching = snapshot().watching[participant.identity] !== undefined;
       const isScreenVideo =
-        track.kind === Track.Kind.Video &&
-        publication.source === Track.Source.ScreenShare;
+        track.kind === LK.Track.Kind.Video &&
+        publication.source === LK.Track.Source.ScreenShare;
       const isScreenAudio =
-        track.kind === Track.Kind.Audio &&
-        publication.source === Track.Source.ScreenShareAudio;
+        track.kind === LK.Track.Kind.Audio &&
+        publication.source === LK.Track.Source.ScreenShareAudio;
       // Screen tracks are opt-in: anything not actively watched is
       // unsubscribed immediately (saves VPS/client bandwidth).
       if ((isScreenVideo || isScreenAudio) && !watching) {
         publication.setSubscribed(false);
         return;
       }
-      if (track.kind === Track.Kind.Audio && snapshot().selfDeafened) {
+      if (track.kind === LK.Track.Kind.Audio && snapshot().selfDeafened) {
         publication.setSubscribed(false);
         return;
       }
@@ -199,17 +223,17 @@ function attachHandlers(next: Room): void {
       }
     },
   );
-  on(next, RoomEvent.AudioPlaybackStatusChanged, (playing: boolean) => {
+  on(next, LK.RoomEvent.AudioPlaybackStatusChanged, (playing: boolean) => {
     snapshot().set({ needsAudioGesture: !playing });
   });
   on(
     next,
-    RoomEvent.TrackMuted,
+    LK.RoomEvent.TrackMuted,
     (track: Track, publication: TrackPublication, participant: Participant) => {
       void track;
       if (
         participant.isLocal &&
-        publication.source === Track.Source.ScreenShare &&
+        publication.source === LK.Track.Source.ScreenShare &&
         !suppressShareNotice
       ) {
         snapshot().set({
@@ -341,13 +365,14 @@ export async function joinVoiceChannel(channelId: string): Promise<void> {
     // browser cannot do 48 kHz / AudioWorklet / WASM.
     const mic = await buildMicChainWithFallback();
     chain = mic;
-    const next = new Room({ adaptiveStream: true, dynacast: true });
+    const sdk = await livekit();
+    const next = new sdk.Room({ adaptiveStream: true, dynacast: true });
     room = next;
-    attachHandlers(next);
+    attachHandlers(next, sdk);
     await next.connect(invitation.url, invitation.token);
     try {
       micPublication = await next.localParticipant.publishTrack(mic.track, {
-        source: Track.Source.Microphone,
+        source: sdk.Track.Source.Microphone,
       });
     } catch {
       // Listen-only grants (or revoked speak): stay connected, listen only.
@@ -444,7 +469,7 @@ export async function rebuildMicChain(): Promise<void> {
   chain = fresh;
   try {
     micPublication = await room.localParticipant.publishTrack(fresh.track, {
-      source: Track.Source.Microphone,
+      source: (await livekit()).Track.Source.Microphone,
     });
   } catch (err) {
     chain = previous;
@@ -471,11 +496,13 @@ export async function setOutputDevice(deviceId: string | null): Promise<boolean>
 }
 
 export async function listInputDevices(): Promise<MediaDeviceInfo[]> {
-  return Room.getLocalDevices("audioinput");
+  const sdk = await livekit();
+  return sdk.Room.getLocalDevices("audioinput");
 }
 
 export async function listOutputDevices(): Promise<MediaDeviceInfo[]> {
-  return Room.getLocalDevices("audiooutput");
+  const sdk = await livekit();
+  return sdk.Room.getLocalDevices("audiooutput");
 }
 
 export async function startAudioPlayback(): Promise<void> {

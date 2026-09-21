@@ -1,14 +1,16 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useMutation } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { Suspense, lazy, useState, type FormEvent } from "react";
 import { FileText, MoreHorizontal } from "lucide-react";
 import type { ChatMessage } from "@vitality/shared";
 import { deleteMessage, editMessage } from "../api/resources.js";
 import { ApiError } from "../api/http.js";
 import { formatMessageTime } from "../lib/format.js";
 import { Avatar } from "../components/Avatar.js";
-import { MessageBody } from "../chat/markdown.js";
 import { ConfirmDialog } from "../components/ui.js";
+
+// Split react-markdown out of the initial bundle (chat list code-splits it).
+const MessageBody = lazy(() => import("../chat/markdown.js"));
 
 function Attachments({ message }: { message: ChatMessage }): React.JSX.Element | null {
   if (message.attachments.length === 0) {
@@ -162,7 +164,9 @@ export function MessageItem({
             </div>
           </form>
         ) : (
-          <MessageBody content={message.content} usernames={usernames} />
+          <Suspense fallback={<p className="text-sm">…</p>}>
+            <MessageBody content={message.content} usernames={usernames} />
+          </Suspense>
         )}
         <Attachments message={message} />
         {error === null ? null : (

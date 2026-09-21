@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Maximize, Minimize, PictureInPicture2, Volume2, VolumeX, X } from "lucide-react";
-import { ConnectionQuality } from "livekit-client";
 import { useVoiceSettings } from "../voice/settings.js";
 import {
   attachStreamAudio,
   attachStreamVideo,
+  isDegradedQuality,
   setStreamQuality,
   setStreamVolume,
   sharerQuality,
@@ -54,10 +54,7 @@ export function StreamTile({
       if (audioRef.current !== null) {
         attachStreamAudio(sharerId, audioRef.current);
       }
-      const quality = sharerQuality(sharerId);
-      setDegraded(
-        quality === ConnectionQuality.Poor || quality === ConnectionQuality.Lost,
-      );
+      setDegraded(isDegradedQuality(sharerQuality(sharerId)));
     }, 1000);
     return () => {
       clearInterval(timer);
@@ -66,7 +63,7 @@ export function StreamTile({
   }, [watching, sharerId]);
 
   useEffect(() => {
-    setStreamVolume(sharerId, muted ? 0 : streamVolume);
+    void setStreamVolume(sharerId, muted ? 0 : streamVolume);
   }, [sharerId, muted, streamVolume]);
 
   if (watching === undefined) {
@@ -127,7 +124,7 @@ export function StreamTile({
             onChange={(event) => {
               const next = event.target.value as StreamQuality;
               setWatchQuality(sharerId, next);
-              setStreamQuality(sharerId, next);
+              void setStreamQuality(sharerId, next);
             }}
             className="rounded px-1 py-0.5 text-[11px] [background-color:var(--surface-1)]"
           >
@@ -160,7 +157,7 @@ export function StreamTile({
               onChange={(event) => {
                 const next = Number(event.target.value) / 100;
                 setStreamVolumeSetting(sharerId, next);
-                setStreamVolume(sharerId, muted ? 0 : next);
+                void setStreamVolume(sharerId, muted ? 0 : next);
               }}
               className="w-20"
             />

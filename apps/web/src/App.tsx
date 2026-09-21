@@ -1,6 +1,6 @@
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { Suspense, lazy, useEffect } from "react";
 import { Menu, Users } from "lucide-react";
 import { fetchServers, fetchState, fetchUnread } from "./api/resources.js";
 import { AuthPage } from "./components/AuthPage.js";
@@ -9,9 +9,15 @@ import { MainView } from "./components/MainView.js";
 import { MemberList } from "./components/MemberList.js";
 import { ServerRail } from "./components/ServerRail.js";
 import { ChatView } from "./chat/ChatView.js";
-import { SettingsModal } from "./components/SettingsModal.js";
 import { UserPanel } from "./components/UserPanel.js";
 import { myAccess } from "./lib/membership.js";
+
+// Settings (Radix dialogs, admin tabs, voice tab) load on first open.
+const SettingsModal = lazy(() =>
+  import("./components/SettingsModal.js").then((module) => ({
+    default: module.SettingsModal,
+  })),
+);
 import { useSessionStore } from "./store/session.js";
 import { useUiStore } from "./store/ui.js";
 import {
@@ -277,7 +283,9 @@ function Shell(): React.JSX.Element {
         </div>
       ) : null}
 
-      <SettingsModal state={state} myUserId={user.id} />
+      <Suspense fallback={null}>
+        <SettingsModal state={state} myUserId={user.id} />
+      </Suspense>
       {serversQuery.isError ? (
         <button
           type="button"

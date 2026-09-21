@@ -1,15 +1,20 @@
-import {
-  ConnectionQuality,
-  ScreenSharePresets,
-  Track,
-  VideoPreset,
-  VideoQuality,
-  type RemoteTrackPublication,
-} from "livekit-client";
+import type { VideoPreset } from "livekit-client";
+import type { RemoteTrackPublication } from "livekit-client";
 import type { ContentHintMode, ScreenPresetId } from "./store.js";
 import { getRoom, setSuppressShareNotice } from "./room.js";
 import { useVoiceConnection } from "./store.js";
 import { useVoiceSettings } from "./settings.js";
+
+type LiveKitModule = typeof import("livekit-client");
+
+let livekitModule: LiveKitModule | null = null;
+
+async function livekit(): Promise<LiveKitModule> {
+  if (livekitModule === null) {
+    livekitModule = await import("livekit-client");
+  }
+  return livekitModule;
+}
 
 export const SHARE_PRESET_LABELS: Record<ScreenPresetId, string> = {
   "720p30": "720p30 — light on bandwidth",
@@ -18,16 +23,17 @@ export const SHARE_PRESET_LABELS: Record<ScreenPresetId, string> = {
   source: "Source — native resolution",
 };
 
-function presetFor(id: ScreenPresetId): VideoPreset {
+async function presetFor(id: ScreenPresetId): Promise<VideoPreset> {
+  const sdk = await livekit();
   switch (id) {
     case "720p30":
-      return ScreenSharePresets.h720fps30;
+      return sdk.ScreenSharePresets.h720fps30;
     case "1080p30":
-      return ScreenSharePresets.h1080fps30;
+      return sdk.ScreenSharePresets.h1080fps30;
     case "1080p60":
-      return new VideoPreset(1920, 1080, 3_000_000, 60);
+      return new sdk.VideoPreset(1920, 1080, 3_000_000, 60);
     case "source":
-      return ScreenSharePresets.original;
+      return sdk.ScreenSharePresets.original;
   }
 }
 
@@ -70,7 +76,7 @@ export async function startShare(
   if (state.sharing !== null) {
     await stopShare();
   }
-  const preset = presetFor(options.preset);
+  const preset = await presetFor(options.preset);
   const publication = await room.localParticipant.setScreenShareEnabled(
     true,
     {
@@ -143,13 +149,15 @@ function publicationsOf(identity: string): ScreenPublications | null {
     }
     let video: RemoteTrackPublication | undefined;
     let audio: RemoteTrackPublication | undefined;
+    // String literals avoid a static livekit-client import (code-split);
+    // values match Track.Source (verified against installed types).
     for (const publication of participant.videoTrackPublications.values()) {
-      if (publication.source === Track.Source.ScreenShare) {
+      if ((publication as { source?: unknown }).source === "screen_share") {
         video = publication as RemoteTrackPublication;
       }
     }
     for (const publication of participant.audioTrackPublications.values()) {
-      if (publication.source === Track.Source.ScreenShareAudio) {
+      if ((publication as { source?: unknown }).source === "screen_share_audio") {
         audio = publication as RemoteTrackPublication;
       }
     }
@@ -168,11 +176,7 @@ export function watchStream(identity: string): void {
     publications.audio.setSubscribed(true);
     const volume = volumes[identity];
     if (volume !== undefined) {
-      for (const participant of getRoom()?.remoteParticipants.values() ?? []) {
-        if (participant.identity === identity) {
-          participant.setVolume(volume, Track.Source.ScreenShareAudio);
-        }
-      }
+      setStreamVolume(identity, volume);
     }
   }
 }
@@ -184,35 +188,37 @@ export function unwatchStream(identity: string): void {
   publications?.audio?.setSubscribed(false);
 }
 
-export function setStreamQuality(
+export async function setStreamQuality(
   identity: string,
   quality: "auto" | "low" | "medium" | "high",
-): void {
+): Promise<void> {
   const video = publicationsOf(identity)?.video;
   if (video === undefined) {
     return;
   }
+  const sdk = await livekit();
   if (quality === "auto") {
     // Adaptive stream resumes control; HIGH is the ceiling for manual caps.
-    video.setVideoQuality(VideoQuality.HIGH);
+    video.setVideoQuality(sdk.VideoQuality.HIGH);
     return;
   }
   const map = {
-    low: VideoQuality.LOW,
-    medium: VideoQuality.MEDIUM,
-    high: VideoQuality.HIGH,
+    low: sdk.VideoQuality.LOW,
+    medium: sdk.VideoQuality.MEDIUM,
+    high: sdk.VideoQuality.HIGH,
   } as const;
   video.setVideoQuality(map[quality]);
 }
 
-export function setStreamVolume(identity: string, volume: number): void {
+export async function setStreamVolume(identity: string, volume: number): Promise<void> {
   const room = getRoom();
   if (room === null) {
     return;
   }
+  const sdk = await livekit();
   for (const participant of room.remoteParticipants.values()) {
     if (participant.identity === identity) {
-      participant.setVolume(volume, Track.Source.ScreenShareAudio);
+      participant.setVolume(volume, sdk.Track.Source.ScreenShareAudio);
     }
   }
 }
@@ -260,7 +266,7 @@ export function attachStreamAudio(
 }
 
 /** Live connection quality of a sharer (for the "degraded" hint). */
-export function sharerQuality(identity: string): ConnectionQuality | null {
+export function sharerQuality(identity: string): string | null {
   const room = getRoom();
   if (room === null) {
     return null;
@@ -271,4 +277,9 @@ export function sharerQuality(identity: string): ConnectionQuality | null {
     }
   }
   return null;
+}
+
+/** True for poor/lost qualities (string-compared to stay code-split). */
+export function isDegradedQuality(quality: string | null): boolean {
+  return quality === "poor" || quality === "lost";
 }

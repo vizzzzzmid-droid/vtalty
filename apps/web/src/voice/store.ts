@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import { ConnectionQuality } from "livekit-client";
 
 export type VoiceStatus =
   | "idle"
@@ -7,6 +6,9 @@ export type VoiceStatus =
   | "connected"
   | "reconnecting"
   | "failed";
+
+/** Connection quality as plain strings (keeps livekit-client out of this chunk). */
+export type VoiceQuality = "unknown" | "excellent" | "good" | "poor" | "lost";
 
 export type ScreenPresetId = "720p30" | "1080p30" | "1080p60" | "source";
 export type ContentHintMode = "detail" | "motion";
@@ -30,7 +32,7 @@ interface VoiceConnection {
   preDeafenMuted: boolean;
   pttActive: boolean;
   speakingIds: string[];
-  connectionQuality: ConnectionQuality;
+  connectionQuality: VoiceQuality;
   /** Browser blocked autoplay: show a "click to enable audio" fallback. */
   needsAudioGesture: boolean;
   /** Non-fatal audio notice (e.g. Enhanced fallback); dismissed on change. */
@@ -57,7 +59,7 @@ export const useVoiceConnection = create<VoiceConnection>()((set) => ({
   preDeafenMuted: false,
   pttActive: false,
   speakingIds: [],
-  connectionQuality: ConnectionQuality.Unknown,
+  connectionQuality: "unknown",
   needsAudioGesture: false,
   audioNotice: null,
   sharing: null,
@@ -94,13 +96,13 @@ export const useVoiceConnection = create<VoiceConnection>()((set) => ({
     }),
 }));
 
-export function qualityDots(quality: ConnectionQuality): number {
+export function qualityDots(quality: VoiceQuality): number {
   switch (quality) {
-    case ConnectionQuality.Excellent:
+    case "excellent":
       return 3;
-    case ConnectionQuality.Good:
+    case "good":
       return 2;
-    case ConnectionQuality.Poor:
+    case "poor":
       return 1;
     default:
       return 0;

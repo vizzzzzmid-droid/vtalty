@@ -7,6 +7,9 @@
     "build": "pnpm --filter @vitality/shared build && pnpm --filter @vitality/server build && pnpm --filter @vitality/web build",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm --filter @vitality/shared build && pnpm -r typecheck",
-    "test": "pnpm --filter @vitality/shared build && pnpm -r test"
+    "test": "pnpm --filter @vitality/shared build && pnpm -r test",
+    "test:scripts": "node --test scripts/init.test.mjs",
+    "init": "node scripts/init.mjs",
+    "doctor": "node scripts/preflight.mjs"
   }
 }

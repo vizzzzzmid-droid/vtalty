@@ -143,3 +143,5 @@ export function MessageBody({
     </div>
   );
 }
+
+export default MessageBody;

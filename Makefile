@@ -1,4 +1,10 @@
-.PHONY: dev up down logs ps migrate test-integration test-e2e
+.PHONY: dev up down logs ps migrate test-integration test-e2e init doctor backup restore
+
+init: ## Generate .env and livekit.yaml with random secrets (never overwrites without --force)
+	node scripts/init.mjs
+
+doctor: ## Preflight checks: docker, ports, secrets, key match, DNS, disk
+	node scripts/preflight.mjs
 
 dev: ## Start postgres+livekit for host development
 	docker compose -f docker-compose.dev.yml up -d
@@ -26,3 +32,9 @@ test-integration: ## Run server integration tests against real Postgres
 
 test-e2e: ## Run Playwright e2e (needs server :3000 + web :5173 running)
 	pnpm --filter @vitality/web test:e2e
+
+backup: ## Dump the database and archive uploads into ./backups
+	node scripts/backup.mjs
+
+restore: ## Restore from backup (DESTRUCTIVE): make restore SQL=... UPLOADS=... [YES=1]
+	node scripts/restore.mjs

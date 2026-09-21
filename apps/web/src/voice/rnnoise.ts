@@ -1,12 +1,23 @@
-import {
+import type {
   NoiseGateWorkletNode,
   RnnoiseWorkletNode,
-  loadRnnoise,
 } from "@sapphi-red/web-noise-suppressor";
 import rnnoiseWorkletUrl from "@sapphi-red/web-noise-suppressor/rnnoiseWorklet.js?url";
 import rnnoiseWasmUrl from "@sapphi-red/web-noise-suppressor/rnnoise.wasm?url";
 import rnnoiseSimdUrl from "@sapphi-red/web-noise-suppressor/rnnoise_simd.wasm?url";
 import noiseGateWorkletUrl from "@sapphi-red/web-noise-suppressor/noiseGateWorklet.js?url";
+
+type SuppressorModule = typeof import("@sapphi-red/web-noise-suppressor");
+
+let suppressorModule: SuppressorModule | null = null;
+
+/** Lazily load the suppressor JS (split out of the initial bundle). */
+async function suppressor(): Promise<SuppressorModule> {
+  if (suppressorModule === null) {
+    suppressorModule = await import("@sapphi-red/web-noise-suppressor");
+  }
+  return suppressorModule;
+}
 
 let cachedWasm: ArrayBuffer | null = null;
 let wasmFailed = false;
@@ -36,6 +47,7 @@ async function loadWasm(): Promise<ArrayBuffer> {
     throw new EnhancedUnavailableError("ENHANCED_WASM");
   }
   try {
+    const { loadRnnoise } = await suppressor();
     cachedWasm = await loadRnnoise({ url: rnnoiseWasmUrl, simdUrl: rnnoiseSimdUrl });
     return cachedWasm;
   } catch {
@@ -64,6 +76,7 @@ export async function createRnnoiseNode(
   } catch {
     throw new EnhancedUnavailableError("ENHANCED_UNAVAILABLE");
   }
+  const { RnnoiseWorkletNode } = await suppressor();
   return new RnnoiseWorkletNode(context, { maxChannels: 1, wasmBinary });
 }
 
@@ -85,6 +98,7 @@ export async function createGateNode(
   } catch {
     throw new EnhancedUnavailableError("ENHANCED_UNAVAILABLE");
   }
+  const { NoiseGateWorkletNode } = await suppressor();
   return new NoiseGateWorkletNode(context, {
     openThreshold: options.openThresholdDb,
     closeThreshold: options.openThresholdDb - 6,
