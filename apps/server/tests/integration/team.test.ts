@@ -232,4 +232,70 @@ describeIf("team management", () => {
       flags: { share_screen: false, connect: true },
     });
   });
+
+  it("only lets the owner kick admins", async () => {
+    const owner = await registerUser(ctx, "owner");
+    const serverId = await ownerServerId(ctx, owner);
+    const state = serverStateSchema.parse(
+      await (
+        await ctx.app.inject({
+          method: "GET",
+          url: `/api/v1/servers/${serverId}/state`,
+          headers: authHeader(owner),
+        })
+      ).json(),
+    );
+    const adminRoleId = state.roles.find((role) => role.name === "admin")?.id ?? "";
+    const first = await registerUser(ctx, "first", await createInvite(ctx, owner, serverId));
+    const second = await registerUser(ctx, "second", await createInvite(ctx, owner, serverId));
+    const promote = async (viewer: TestUser, userId: string) =>
+      ctx.app.inject({
+        method: "PATCH",
+        url: `/api/v1/members/${await memberIdOf(ctx, viewer, serverId, userId)}`,
+        headers: authHeader(viewer),
+        payload: { roleId: adminRoleId },
+      });
+    expect((await promote(owner, first.id)).statusCode).toBe(200);
+    expect((await promote(owner, second.id)).statusCode).toBe(200);
+
+    const adminKicksAdmin = await ctx.app.inject({
+      method: "DELETE",
+      url: `/api/v1/members/${await memberIdOf(ctx, owner, serverId, second.id)}`,
+      headers: authHeader(first),
+    });
+    expect(adminKicksAdmin.statusCode).toBe(403);
+
+    const ownerKicksAdmin = await ctx.app.inject({
+      method: "DELETE",
+      url: `/api/v1/members/${await memberIdOf(ctx, owner, serverId, second.id)}`,
+      headers: authHeader(owner),
+    });
+    expect(ownerKicksAdmin.statusCode).toBe(204);
+  });
+
+  it("hides server existence from non-members (no 403/404 oracle)", async () => {
+    const owner = await registerUser(ctx, "owner");
+    const code = await createInvite(ctx, owner, await ownerServerId(ctx, owner));
+    const outsider = await registerUser(ctx, "outsider", code);
+    const second = await ctx.app.inject({
+      method: "POST",
+      url: "/api/v1/servers",
+      headers: authHeader(owner),
+      payload: { name: "second" },
+    });
+    const secondId = (second.json() as { id: string }).id;
+
+    const forbidden = await ctx.app.inject({
+      method: "GET",
+      url: `/api/v1/servers/${secondId}/state`,
+      headers: authHeader(outsider),
+    });
+    const missing = await ctx.app.inject({
+      method: "GET",
+      url: "/api/v1/servers/00000000-0000-0000-0000-000000000000/state",
+      headers: authHeader(outsider),
+    });
+    expect(forbidden.statusCode).toBe(404);
+    expect(missing.statusCode).toBe(404);
+  });
 });

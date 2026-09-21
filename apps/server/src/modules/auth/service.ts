@@ -85,6 +85,7 @@ async function issueSession(
       userId,
       env.JWT_ACCESS_SECRET,
       env.ACCESS_TOKEN_TTL_SECONDS,
+      familyId,
     ),
     refreshToken,
     refreshMaxAgeSeconds,

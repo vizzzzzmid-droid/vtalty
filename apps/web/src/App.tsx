@@ -13,7 +13,6 @@ import { UserPanel } from "./components/UserPanel.js";
 import { myAccess } from "./lib/membership.js";
 import { useSessionStore } from "./store/session.js";
 import { useUiStore } from "./store/ui.js";
-import { connectSocket } from "./ws/socket.js";
 
 function LoadingScreen(): React.JSX.Element {
   return (
@@ -27,7 +26,6 @@ function LoadingScreen(): React.JSX.Element {
 
 function Shell(): React.JSX.Element {
   const user = useSessionStore((state) => state.user);
-  const accessToken = useSessionStore((state) => state.accessToken);
   const logout = useSessionStore((state) => state.logout);
   const selectedServerId = useUiStore((state) => state.selectedServerId);
   const selectedChannelId = useUiStore((state) => state.selectedChannelId);
@@ -36,12 +34,6 @@ function Shell(): React.JSX.Element {
   const setMobileNav = useUiStore((state) => state.setMobileNav);
   const mobileMembersOpen = useUiStore((state) => state.mobileMembersOpen);
   const setMobileMembers = useUiStore((state) => state.setMobileMembers);
-
-  useEffect(() => {
-    if (accessToken !== null) {
-      connectSocket(accessToken);
-    }
-  }, [accessToken]);
 
   const serversQuery = useQuery({ queryKey: ["servers"], queryFn: fetchServers });
 

@@ -176,6 +176,11 @@ export const inviteSchema = z.object({
   createdAt: z.string().datetime(),
 });
 
+export const wsTicketResponseSchema = z.object({
+  ticket: z.string().min(1).max(256),
+});
+export type WsTicketResponse = z.infer<typeof wsTicketResponseSchema>;
+
 export type RegisterBody = z.infer<typeof registerBodySchema>;
 export type LoginBody = z.infer<typeof loginBodySchema>;
 export type AuthResponse = z.infer<typeof authResponseSchema>;

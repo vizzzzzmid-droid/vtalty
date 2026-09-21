@@ -21,9 +21,9 @@
 - Full plan: `docs/ARCHITECTURE.md` (read it first). Deferred items:
   `docs/ROADMAP.md`. Manual voice test checklist: `docs/MANUAL_TESTS.md`
   (from Phase 4).
-- Current phase: **Phase 2 — DONE (verified locally; integration + compose
-  smoke need VPS/CI)**. Next: Phase 3 text chat (starts only after user
-  says "continue").
+- Current phase: **Phase 2.5 — DONE (verified locally; integration +
+  compose smoke need VPS/CI)**. Next: Phase 3 text chat (starts only after
+  user says "continue").
 - Repo root moved to `vitality/` (clean dir; parent `Default Project` holds
   unrelated files). All paths below are relative to `vitality/`.
 - Local toolchain (this Windows machine): Node 24.19 + pnpm 9.15.0 via
@@ -97,7 +97,10 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
 
 - REST base `/api/v1`; single WS `/ws` with versioned envelope
   `{ v, seq, type, data, at }`, `WS_PROTOCOL_VERSION = 1` in
-  `packages/shared`. Reconnect: backoff + `lastSeq` resume + snapshot refetch.
+  `packages/shared`. WS auth is a single-use ticket
+  (`POST /api/v1/ws-ticket` → `/ws?ticket=`, 30s TTL, session-bound);
+  access JWT carries `sub`+`sid`. Reconnect: backoff + snapshot refetch.
+  Typing throttled 1/3s per socket+channel; inbound frames capped 64 KiB.
 - Data model: users, refresh_tokens, servers, roles (owner/admin/member +
   flags), members, channel_categories, channels (text|voice), messages
   (ULID id), attachments, invites, read_states. First user = owner. Seed:
@@ -137,6 +140,15 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   `pnpm build`, compose YAML parse. Integration tests (auth/team/
   channels/WS vs real Postgres) + `docker compose up` smoke still require
   CI/VPS (no local Docker/Postgres on this Windows box).
+- [x] Phase 2.5 — Hardening. Git init + squashed baseline commit (git
+  appeared only now; author vitalik@localhost). WS tickets replace
+  `?token=`; `sid` session binding; pino redaction + Caddy ticket scrub;
+  CI `compose-smoke` (`up -d --wait`, curl `-k` probes, logs on failure);
+  `.nvmrc` (22) + `.gitattributes` (LF); livekit healthcheck REMOVED
+  (busybox wget codes — would never go healthy); Caddy `/healthz`+`/readyz`
+  handles. Adversarial review → 9 fixes (atomic invite redeem, kick-admin
+  rule, state 404, typing throttle, maxPayload, tickets, argon2 pin) with
+  regression tests; residuals in `docs/SECURITY_NOTES.md`.
 - [ ] Phase 3 — Text chat.
 - [ ] Phase 4 — Voice (LiveKit).
 - [ ] Phase 5 — Screen share + noise suppression.

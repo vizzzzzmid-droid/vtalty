@@ -113,6 +113,33 @@ describeIf("auth flow", () => {
     expect(anonRes.statusCode).toBe(401);
   });
 
+  it("redeems single-use invites atomically under concurrency", async () => {
+    const owner = await registerUser(ctx, "owner");
+    const serversRes = await ctx.app.inject({
+      method: "GET",
+      url: "/api/v1/servers",
+      headers: authHeader(owner),
+    });
+    const serverId = (serversRes.json() as { id: string }[])[0]?.id ?? "";
+    const inviteRes = await ctx.app.inject({
+      method: "POST",
+      url: `/api/v1/servers/${serverId}/invites`,
+      headers: authHeader(owner),
+      payload: { maxUses: 1 },
+    });
+    const code = (inviteRes.json() as { code: string }).code;
+
+    const attempts = await Promise.allSettled(
+      ["racer0", "racer1", "racer2", "racer3", "racer4"].map((username) =>
+        registerUser(ctx, username, code),
+      ),
+    );
+    const succeeded = attempts.filter(
+      (result) => result.status === "fulfilled",
+    );
+    expect(succeeded).toHaveLength(1);
+  });
+
   it("rotates refresh tokens and detects reuse", async () => {
     const user = await registerUser(ctx, "rotator");
     const first = await ctx.app.inject({

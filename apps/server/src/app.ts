@@ -7,6 +7,7 @@ import { ZodError } from "zod";
 import type { Db } from "./db/client.js";
 import type { Env } from "./env.js";
 import { HttpError } from "./lib/errors.js";
+import { loggerOptions } from "./lib/logger.js";
 import { registerAuthRoutes } from "./modules/auth/routes.js";
 import { registerChannelRoutes } from "./modules/channels/routes.js";
 import { registerInviteRoutes } from "./modules/invites/routes.js";
@@ -14,6 +15,7 @@ import { registerMemberRoutes } from "./modules/members/routes.js";
 import { registerRoleRoutes } from "./modules/roles/routes.js";
 import { registerServerRoutes } from "./modules/servers/routes.js";
 import { registerUserRoutes } from "./modules/users/routes.js";
+import { registerWsTicketRoutes } from "./modules/ws-tickets/routes.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerGateway } from "./ws/gateway.js";
 
@@ -24,7 +26,7 @@ export interface AppDeps {
 
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({
-    logger: deps.env.NODE_ENV === "test" ? false : true,
+    logger: deps.env.NODE_ENV === "test" ? false : loggerOptions(),
   });
   app.decorate("config", deps.env);
 
@@ -79,6 +81,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   registerInviteRoutes(app, deps);
   registerMemberRoutes(app, deps);
   registerRoleRoutes(app, deps);
+  registerWsTicketRoutes(app, deps);
   await registerGateway(app, deps);
 
   return app;

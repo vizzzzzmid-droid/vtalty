@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type { LoginBody, RegisterBody, User } from "@vitality/shared";
 import { login, logoutServer, register } from "../api/resources.js";
 import { setAccessToken, setRefreshHandler } from "../api/http.js";
-import { disconnectSocket } from "../ws/socket.js";
+import { connectSocket, disconnectSocket } from "../ws/socket.js";
 
 type SessionStatus = "loading" | "authed" | "guest";
 
@@ -19,6 +19,7 @@ interface SessionState {
 function applyAuth(user: User, token: string): void {
   setAccessToken(token);
   useSessionStore.setState({ user, accessToken: token, status: "authed" });
+  connectSocket();
 }
 
 function applyGuest(): void {

@@ -199,7 +199,15 @@ export async function getServerState(
   userId: string,
   serverId: string,
 ): Promise<ServerState> {
-  await requireMembership(db, userId, serverId);
+  try {
+    await requireMembership(db, userId, serverId);
+  } catch (err) {
+    // Hide server existence from non-members (no 403 vs 404 oracle).
+    if (err instanceof HttpError && err.statusCode === 403) {
+      throw notFound("Server not found");
+    }
+    throw err;
+  }
 
   const serverRows = await db
     .select()

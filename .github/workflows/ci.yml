@@ -59,3 +59,25 @@ jobs:
       - run: docker compose config --quiet
       - run: docker compose -f docker-compose.dev.yml config --quiet
       - run: docker compose build
+
+  compose-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate CI-only env and LiveKit config
+        run: |
+          cp .env.example .env
+          cp livekit.example.yaml livekit.yaml
+      - name: Start the full stack
+        run: docker compose up -d --wait
+        timeout-minutes: 10
+      - name: Probe HTTPS endpoints (internal CA, hence -k)
+        run: |
+          curl -k -f https://localhost/healthz
+          curl -k -f https://localhost/api/v1/health
+      - name: Dump stack logs on failure
+        if: failure()
+        run: docker compose logs
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

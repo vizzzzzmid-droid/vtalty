@@ -9,6 +9,26 @@
 {$CADDY_DOMAIN:localhost} {
 	encode gzip
 
+	# Access logs: Cookie/Authorization headers are REDACTED by Caddy's
+	# default. The single-use WS `ticket` query param is scrubbed below so
+	# it never lands in logs (verified against Caddy log directive docs).
+	log {
+		format filter {
+			request>uri query {
+				replace ticket REDACTED
+			}
+		}
+	}
+
+	# Liveness/readiness are served by the API (used by compose-smoke).
+	handle /healthz {
+		reverse_proxy server:3000
+	}
+
+	handle /readyz {
+		reverse_proxy server:3000
+	}
+
 	handle /api/* {
 		reverse_proxy server:3000
 	}

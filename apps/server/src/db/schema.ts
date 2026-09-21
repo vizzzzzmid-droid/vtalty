@@ -127,7 +127,6 @@ export const channels = pgTable("channels", {
   position: integer("position").notNull().default(0),
   createdAt: createdAt(),
 });
-
 export const invites = pgTable("invites", {
   id: text("id")
     .primaryKey()
@@ -142,6 +141,22 @@ export const invites = pgTable("invites", {
   maxUses: integer("max_uses"),
   uses: integer("uses").notNull().default(0),
   expiresAt: timestamp("expires_at", { withTimezone: true }),
+  createdAt: createdAt(),
+});
+
+// One-time WebSocket handshake tickets (Phase 2.5): short TTL, single use,
+// bound to the user and their refresh-token family (logout kills them).
+export const wsTickets = pgTable("ws_tickets", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => uuidId()),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  familyId: text("family_id").notNull(),
+  ticketHash: text("ticket_hash").notNull().unique(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  usedAt: timestamp("used_at", { withTimezone: true }),
   createdAt: createdAt(),
 });
 

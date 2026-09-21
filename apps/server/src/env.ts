@@ -8,6 +8,7 @@ const envSchema = z.object({
   JWT_ACCESS_SECRET: z.string().min(32),
   ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(30),
+  WS_TICKET_TTL_SECONDS: z.coerce.number().int().positive().default(30),
   COOKIE_SECURE: z.enum(["true", "false"]).default("false").transform((v) => v === "true"),
   REGISTRATION_MODE: z.enum(["invite-only", "open"]).default("invite-only"),
   LIVEKIT_URL: z.string().default("http://livekit:7880"),

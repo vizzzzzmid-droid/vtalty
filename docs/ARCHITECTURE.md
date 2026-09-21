@@ -280,9 +280,14 @@ Migrations run on server start (Drizzle `migrate()`), before listening.
 
 ## 6. Realtime protocol (packages/shared, versioned)
 
-Single WS endpoint (e.g. `/ws`) with JWT auth (query `?token=` on connect
-only, then short-lived; re-auth on refresh without dropping presence where
-possible). Protocol version constant, e.g. `WS_PROTOCOL_VERSION = 1`.
+Single WS endpoint (e.g. `/ws`) with ticket auth: the client mints a
+single-use ticket via authenticated `POST /api/v1/ws-ticket` (~30s TTL,
+bound to the user and their refresh-token family, hashed at rest, consumed
+atomically), then connects `/ws?ticket=…`. Long-lived JWTs never appear in
+URLs (and therefore never in access logs); the ticket query param is
+additionally scrubbed from Caddy access logs and redacted in pino logs.
+Access JWTs carry `sub` + `sid` (session family) so tickets die with logout.
+Protocol version constant, e.g. `WS_PROTOCOL_VERSION = 1`.
 Envelope:
 
 ```ts
@@ -305,7 +310,8 @@ Server→client (minimum, implemented Phase 2 unless noted):
 
 - `server.ready` (`user_id`, per-connection `seq` start; Phase 2 addition).
 - `message.create|update|delete` (+ `channel_id`). // Phase 3
-- `typing.start` (`channel_id`, `user_id`, short TTL client-side).
+- `typing.start` (`channel_id`, `user_id`, short TTL client-side;
+  server-throttled to 1 per 3s per socket+channel).
 - `presence.update` (`user_id`, `status: online|idle|offline`).
 - `channel.create|update|delete`, `category.create|update|delete` (category
   events implied by "channel CRUD" + collapsible categories).
@@ -321,6 +327,7 @@ Rules:
 - Reconnect: exponential backoff + jitter, `lastSeq` resume; on gap or
   reconnect, client refetches `GET /servers/:id/state` snapshot (channels,
   members, presence, voice states, read states) then resumes live events.
+  Inbound WS frames are capped at 64 KiB (`maxPayload`, close 1009).
 - Heartbeats (ping/pong) + idle detection (client reports idle; server marks
   offline after timeout).
 - All payloads zod-validated; unknown `type` ignored with metric, never crash.

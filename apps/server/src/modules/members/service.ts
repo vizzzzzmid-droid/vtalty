@@ -128,9 +128,17 @@ export async function kickMember(
   memberId: string,
 ): Promise<void> {
   const target = await findMemberOr404(db, memberId);
-  await requirePermission(db, actorId, target.serverId, "manage_members");
+  const membership = await requirePermission(
+    db,
+    actorId,
+    target.serverId,
+    "manage_members",
+  );
   if (target.roleName === "owner") {
     throw forbidden("The server owner cannot be kicked");
+  }
+  if (target.roleName === "admin" && !membership.isOwner) {
+    throw forbidden("Only the owner can kick admins");
   }
   if (target.userId === actorId) {
     throw forbidden("Use leave to remove yourself");

@@ -28,15 +28,12 @@ services:
       - "7882:7882/udp" # WebRTC media (UDP mux, single port)
       - "3478:3478/udp" # TURN/UDP (+STUN)
       - "5349:5349/tcp" # TURN/TLS
-    healthcheck:
-      # LiveKit exposes no dedicated HTTP health endpoint on :7880, so probe
-      # the HTTP stack itself: any HTTP response (even 404 -> wget exit 8)
-      # proves the process is alive; connection refused (exit 4) does not.
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:7880/ || test $$? -eq 8"]
-      interval: 10s
-      timeout: 3s
-      retries: 6
-      start_period: 15s
+    # NOTE: intentionally no healthcheck. LiveKit exposes no stable HTTP
+    # health endpoint on :7880, and the minimal Alpine image only ships
+    # busybox wget (exit code 1 for every HTTP error, so a "any response is
+    # alive" probe cannot distinguish 404-alive from connection-refused).
+    # The server does not depend on LiveKit at boot (Phase 4 adds a
+    # server-side reachability check to /readyz instead).
     restart: unless-stopped
 
   server:
@@ -61,7 +58,7 @@ services:
       postgres:
         condition: service_healthy
       livekit:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/healthz || exit 1"]
       interval: 10s

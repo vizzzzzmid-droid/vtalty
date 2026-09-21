@@ -1,8 +1,13 @@
 import argon2 from "argon2";
 
-// argon2.hash defaults to argon2id, the recommended variant for passwords.
+// argon2.hash defaults to argon2id; parameters are pinned explicitly so a
+// library upgrade cannot silently weaken password hashing.
 export function hashPassword(password: string): Promise<string> {
-  return argon2.hash(password);
+  return argon2.hash(password, {
+    memoryCost: 65536,
+    timeCost: 3,
+    parallelism: 4,
+  });
 }
 
 /** Returns false for wrong passwords and for malformed hashes. */

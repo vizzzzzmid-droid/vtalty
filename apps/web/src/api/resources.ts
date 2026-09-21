@@ -1,5 +1,6 @@
 import {
   serverStateSchema,
+  wsTicketResponseSchema,
   type AuthResponse,
   type Category,
   type Channel,
@@ -36,6 +37,12 @@ export function logoutServer(): Promise<void> {
 
 export function fetchMe(): Promise<User> {
   return get<User>("/auth/me");
+}
+
+/** Mint a single-use WS ticket for the current session. */
+export async function requestWsTicket(): Promise<string> {
+  const data: unknown = await post<unknown>("/ws-ticket");
+  return wsTicketResponseSchema.parse(data).ticket;
 }
 
 export function patchMe(patchBody: {

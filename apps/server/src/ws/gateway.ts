@@ -3,10 +3,11 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { WebSocket } from "ws";
 import { wsClientIntentSchema } from "@vitality/shared";
 import type { AppDeps } from "../app.js";
-import { verifyAccessToken } from "../lib/jwt.js";
+import { HttpError } from "../lib/errors.js";
 import { getMembership } from "../lib/permissions.js";
 import { getChannelServerId } from "../modules/channels/service.js";
 import { getMemberServerIds } from "../modules/members/service.js";
+import { consumeWsTicket } from "../modules/ws-tickets/service.js";
 import {
   addConnection,
   broadcastToServers,
@@ -16,6 +17,25 @@ import {
   sendEvent,
   setUserStatus,
 } from "./hub.js";
+
+const typingCooldown = new Map<WebSocket, Map<string, number>>();
+const TYPING_COOLDOWN_MS = 3000;
+
+/** Per-socket, per-channel typing throttle (broadcast-storm protection). */
+function typingAllowed(socket: WebSocket, channelId: string): boolean {
+  const now = Date.now();
+  let perSocket = typingCooldown.get(socket);
+  if (perSocket === undefined) {
+    perSocket = new Map();
+    typingCooldown.set(socket, perSocket);
+  }
+  const last = perSocket.get(channelId) ?? 0;
+  if (now - last < TYPING_COOLDOWN_MS) {
+    return false;
+  }
+  perSocket.set(channelId, now);
+  return true;
+}
 
 async function handleIntent(
   app: FastifyInstance,
@@ -38,12 +58,15 @@ async function handleIntent(
   }
   switch (intent.data.type) {
     case "client.hello": {
-      // No server-side event log in Phase 2: clients refetch the REST
-      // snapshot on (re)connect, then consume live events. lastSeq is
-      // accepted for future gap detection.
+      // No server-side event log: clients refetch the REST snapshot on
+      // (re)connect, then consume live events. lastSeq is accepted for
+      // future gap detection.
       break;
     }
     case "typing.start": {
+      if (!typingAllowed(socket, intent.data.channelId)) {
+        break;
+      }
       const serverId = await getChannelServerId(deps.db, intent.data.channelId);
       if (serverId === null) {
         break;
@@ -69,18 +92,26 @@ async function handleSocket(
   app: FastifyInstance,
   deps: AppDeps,
   socket: WebSocket,
-  request: FastifyRequest<{ Querystring: { token?: string } }>,
+  request: FastifyRequest<{ Querystring: { ticket?: string } }>,
 ): Promise<void> {
-  const raw = request.query.token;
+  // Auth is a single-use ticket minted via POST /api/v1/ws-ticket. Long-lived
+  // JWTs never appear in the URL (and therefore never in access logs).
+  const raw = request.query.ticket;
   if (typeof raw !== "string" || raw.length === 0) {
-    socket.close(4401, "missing token");
+    socket.close(4401, "missing ticket");
     return;
   }
   let userId: string;
   try {
-    userId = verifyAccessToken(raw, app.config.JWT_ACCESS_SECRET);
-  } catch {
-    socket.close(4401, "invalid token");
+    const claims = await consumeWsTicket(deps.db, raw);
+    userId = claims.userId;
+  } catch (err) {
+    if (err instanceof HttpError) {
+      socket.close(4401, "invalid ticket");
+      return;
+    }
+    app.log.error({ err }, "failed to consume WS ticket");
+    socket.close(1011, "internal error");
     return;
   }
   let serverIds: string[];
@@ -106,6 +137,7 @@ async function handleSocket(
     markAlive(socket);
   });
   socket.on("close", () => {
+    typingCooldown.delete(socket);
     removeConnection(socket);
   });
   socket.on("error", (err: Error) => {
@@ -117,7 +149,9 @@ export async function registerGateway(
   app: FastifyInstance,
   deps: AppDeps,
 ): Promise<void> {
-  await app.register(websocket);
+  // Cap inbound frame size (intents are tiny JSON); oversized frames are
+  // dropped with code 1009 instead of buffering attacker-controlled memory.
+  await app.register(websocket, { options: { maxPayload: 64 * 1024 } });
 
   const timer = setInterval(() => {
     try {
@@ -131,7 +165,7 @@ export async function registerGateway(
     clearInterval(timer);
   });
 
-  app.get<{ Querystring: { token?: string } }>(
+  app.get<{ Querystring: { ticket?: string } }>(
     "/ws",
     { websocket: true },
     (socket, request) => {

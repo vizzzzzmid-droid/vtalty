@@ -6,6 +6,8 @@ import { verifyAccessToken } from "./jwt.js";
 declare module "fastify" {
   interface FastifyRequest {
     userId: string;
+    /** Refresh-token family id from the access token (`sid` claim). */
+    sessionId: string;
   }
   interface FastifyInstance {
     config: Env;
@@ -20,10 +22,12 @@ export async function authenticate(request: FastifyRequest): Promise<void> {
   }
   const token = header.slice("Bearer ".length);
   try {
-    request.userId = verifyAccessToken(
+    const claims = verifyAccessToken(
       token,
       (request.server as FastifyInstance).config.JWT_ACCESS_SECRET,
     );
+    request.userId = claims.sub;
+    request.sessionId = claims.sid;
   } catch {
     throw unauthorized("Invalid or expired token");
   }

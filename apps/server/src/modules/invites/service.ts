@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import type { CreateInviteBody, Invite } from "@vitality/shared";
 import type { Db, DbOrTx } from "../../db/client.js";
 import { invites, type InviteRow } from "../../db/schema.js";
@@ -98,6 +98,24 @@ export async function consumeInvite(
   tx: DbOrTx,
   code: string,
 ): Promise<string> {
+  // Atomic redeem: the UPDATE only matches a usable invite, so concurrent
+  // registrations cannot over-redeem maxUses (no read-modify-write race).
+  const redeemed = await tx
+    .update(invites)
+    .set({ uses: sql`${invites.uses} + 1` })
+    .where(
+      and(
+        eq(invites.code, code),
+        or(isNull(invites.expiresAt), gt(invites.expiresAt, new Date())),
+        or(isNull(invites.maxUses), sql`${invites.uses} < ${invites.maxUses}`),
+      ),
+    )
+    .returning({ serverId: invites.serverId });
+  const claimed = redeemed[0];
+  if (claimed !== undefined) {
+    return claimed.serverId;
+  }
+  // The redeem failed atomically; re-read once for a precise error code.
   const rows = await tx
     .select()
     .from(invites)
@@ -110,12 +128,5 @@ export async function consumeInvite(
   if (row.expiresAt !== null && row.expiresAt.getTime() <= Date.now()) {
     throw badRequest("INVITE_EXPIRED", "Invite code has expired");
   }
-  if (row.maxUses !== null && row.uses >= row.maxUses) {
-    throw badRequest("INVITE_EXHAUSTED", "Invite code has no uses left");
-  }
-  await tx
-    .update(invites)
-    .set({ uses: row.uses + 1 })
-    .where(eq(invites.id, row.id));
-  return row.serverId;
+  throw badRequest("INVITE_EXHAUSTED", "Invite code has no uses left");
 }
