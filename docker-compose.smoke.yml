@@ -1,0 +1,8 @@
+# Smoke-test overlay: localhost-only LiveKit signalling for the native RTC
+# smoke client (scripts/smoke-stack.mjs). Production must NOT publish :7880
+# (the API stays internal; browsers use wss://<domain>/livekit via Caddy).
+# Usage: docker compose -f docker-compose.yml -f docker-compose.smoke.yml up
+services:
+  livekit:
+    ports:
+      - "127.0.0.1:7880:7880"

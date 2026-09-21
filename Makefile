@@ -37,4 +37,4 @@ backup: ## Dump the database and archive uploads into ./backups
 	node scripts/backup.mjs
 
 restore: ## Restore from backup (DESTRUCTIVE): make restore SQL=... UPLOADS=... [YES=1]
-	node scripts/restore.mjs
+	SQL="$(SQL)" UPLOADS="$(UPLOADS)" YES="$(YES)" node scripts/restore.mjs

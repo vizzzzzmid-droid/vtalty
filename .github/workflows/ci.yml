@@ -74,28 +74,31 @@ jobs:
         with:
           fail-on-severity: high
 
-  compose-smoke:
+  # Full-stack proof: drives the PRODUCTION compose stack through its public
+  # HTTPS entrypoint (register, WS, chat, uploads, voice-token, Caddy /livekit
+  # path, real LiveKit join+publish, backup/restore, restart reconcile).
+  # Blocking: a red stack-smoke means the release artifact itself is broken.
+  stack-smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - name: Generate CI-only env and LiveKit config
-        run: |
-          cp .env.example .env
-          cp livekit.example.yaml livekit.yaml
-      - name: Start the full stack
-        run: docker compose up -d --wait
-        timeout-minutes: 10
-      - name: Probe HTTPS endpoints (internal CA, hence -k)
-        run: |
-          curl -k -f https://localhost/healthz
-          curl -k -f https://localhost/api/v1/health
-          curl -k -sI https://localhost/ | grep -i "content-security-policy:.*wasm-unsafe-eval"
-      - name: Dump stack logs on failure
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Generate CI config
+        run: node scripts/init.mjs --domain localhost
+      - name: Run the full-stack smoke
+        run: node scripts/smoke-stack.mjs
+        timeout-minutes: 25
+      - name: Dump stack state on failure
         if: failure()
-        run: docker compose logs
-      - name: Tear down
-        if: always()
-        run: docker compose down -v
+        run: docker compose ps; docker compose logs --tail=200
 
   e2e:
     runs-on: ubuntu-latest

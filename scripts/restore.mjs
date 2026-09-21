@@ -43,8 +43,11 @@ async function confirm(question) {
 }
 
 async function main() {
-  const sqlFile = flag("--sql") ?? process.env["SQL"] ?? null;
-  const uploadsFile = flag("--uploads") ?? process.env["UPLOADS"] ?? null;
+  const sqlFlag = flag("--sql") ?? process.env["SQL"] ?? null;
+  const uploadsFlag = flag("--uploads") ?? process.env["UPLOADS"] ?? null;
+  // GNU make always passes the variables (possibly empty): treat "" as absent.
+  const sqlFile = sqlFlag === null || sqlFlag.length === 0 ? null : sqlFlag;
+  const uploadsFile = uploadsFlag === null || uploadsFlag.length === 0 ? null : uploadsFlag;
   if (sqlFile === null && uploadsFile === null) {
     console.error("Nothing to restore: pass --sql <file> and/or --uploads <file>.");
     process.exitCode = 1;

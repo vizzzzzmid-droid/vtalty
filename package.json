@@ -11,5 +11,9 @@
     "test:scripts": "node --test scripts/init.test.mjs",
     "init": "node scripts/init.mjs",
     "doctor": "node scripts/preflight.mjs"
+  },
+  "devDependencies": {
+    "@livekit/rtc-node": "1.1.0",
+    "ws": "8.21.3"
   }
 }
