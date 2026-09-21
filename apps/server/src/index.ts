@@ -4,6 +4,8 @@ import { runMigrations } from "./db/migrate.js";
 import { loadEnv } from "./env.js";
 import { createLiveKit } from "./lib/livekit.js";
 import { logger } from "./lib/logger.js";
+import { LocalStorage } from "./modules/uploads/storage.js";
+import { cleanupOrphanUploads } from "./modules/uploads/service.js";
 import { reconcileVoice } from "./modules/voice/service.js";
 
 async function main(): Promise<void> {
@@ -32,9 +34,26 @@ async function main(): Promise<void> {
   }, env.VOICE_RECONCILE_INTERVAL_SECONDS * 1000);
   reconcileTimer.unref();
 
+  // Orphaned uploads (chips removed before send) older than the configured
+  // age are purged hourly; failures are logged, never fatal.
+  const storage = new LocalStorage(env.UPLOAD_DIR);
+  const cleanupTimer = setInterval(() => {
+    cleanupOrphanUploads(db, storage, env.UPLOAD_CLEANUP_MAX_AGE_HOURS)
+      .then((summary) => {
+        if (summary.deleted > 0) {
+          logger.info(summary, "orphaned uploads cleaned up");
+        }
+      })
+      .catch((err: unknown) => {
+        logger.warn({ err }, "upload cleanup failed");
+      });
+  }, env.UPLOAD_CLEANUP_INTERVAL_SECONDS * 1000);
+  cleanupTimer.unref();
+
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, "shutting down");
     clearInterval(reconcileTimer);
+    clearInterval(cleanupTimer);
     await app.close();
     await close();
   };

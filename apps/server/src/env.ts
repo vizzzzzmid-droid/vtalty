@@ -18,6 +18,8 @@ const envSchema = z.object({
   VOICE_MAX_PARTICIPANTS: z.coerce.number().int().positive().default(15),
   VOICE_RECONCILE_INTERVAL_SECONDS: z.coerce.number().int().positive().default(60),
   VOICE_MAX_SHARERS: z.coerce.number().int().positive().default(3),
+  UPLOAD_CLEANUP_MAX_AGE_HOURS: z.coerce.number().int().positive().default(24),
+  UPLOAD_CLEANUP_INTERVAL_SECONDS: z.coerce.number().int().positive().default(3600),
   UPLOAD_DIR: z.string().default("/data/uploads"),
   UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(10 * 1024 * 1024),
 });

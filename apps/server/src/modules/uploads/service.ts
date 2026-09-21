@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull, lt } from "drizzle-orm";
 import type { MessageAttachment } from "@vitality/shared";
 import type { Db } from "../../db/client.js";
 import {
@@ -167,4 +167,39 @@ export async function serveAttachment(
     filename: row.filename,
     inline: isInlineImage(row.mime),
   };
+}
+
+export interface CleanupSummary {
+  deleted: number;
+  bytes: number;
+}
+
+/**
+ * Delete unclaimed uploads (message_id IS NULL, e.g. chips removed before
+ * send) older than maxAgeHours. Runs hourly in-process; storage failures
+ * for one file do not abort the rest, and the DB row is removed only after
+ * the file is gone (a leftover row is re-picked next run).
+ */
+export async function cleanupOrphanUploads(
+  db: Db,
+  storage: UploadStorage,
+  maxAgeHours: number,
+): Promise<CleanupSummary> {
+  const cutoff = new Date(Date.now() - maxAgeHours * 3600 * 1000);  const orphans = await db
+    .select()
+    .from(attachments)
+    .where(and(isNull(attachments.messageId), lt(attachments.createdAt, cutoff)));
+  let deleted = 0;
+  let bytes = 0;
+  for (const row of orphans) {
+    try {
+      await storage.delete(row.storageKey);
+    } catch {
+      continue;
+    }
+    await db.delete(attachments).where(eq(attachments.id, row.id));
+    deleted += 1;
+    bytes += row.bytes;
+  }
+  return { deleted, bytes };
 }

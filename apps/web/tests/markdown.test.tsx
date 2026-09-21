@@ -76,6 +76,32 @@ describe("MessageBody sanitization", () => {
     expect(out.match(/<span class="rounded/g)?.length ?? 0).toBe(1);
   });
 
+  it("highlights mentions inside bold, lists, quotes and headings", () => {
+    const cases = [
+      "**hey @anna**",
+      "- ping @anna",
+      "> @anna look",
+      "### @anna title",
+      "[@anna](https://example.com)",
+    ];
+    for (const content of cases) {
+      const out = html(content, ["anna"]);
+      expect(out.match(/<span class="rounded/g)?.length ?? 0).toBe(1);
+    }
+  });
+
+  it("leaves mentions inside code blocks alone", () => {
+    const out = html("`@anna` and\n```\n@anna\n```", ["anna"]);
+    expect(out.match(/<span class="rounded/g) ?? []).toHaveLength(0);
+    expect(out).toContain("@anna");
+  });
+
+  it("keeps javascript: links stripped inside formatting", () => {
+    const out = html("**[click](javascript:alert(1))**", []);
+    expect(out).not.toContain("javascript:");
+    expect(out).toContain("<strong>");
+  });
+
   it("renders quotes and lists", () => {
     const out = html("> quoted\n\n- one\n- two");
     expect(out).toContain("<blockquote");

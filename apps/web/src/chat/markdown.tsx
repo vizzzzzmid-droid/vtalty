@@ -1,7 +1,13 @@
 import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Children, isValidElement, type ReactNode } from "react";
+import {
+  Children,
+  cloneElement,
+  isValidElement,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import { MENTION_PATTERN_SOURCE } from "@vitality/shared";
 
 const MENTION_RE = new RegExp(MENTION_PATTERN_SOURCE, "g");
@@ -62,12 +68,53 @@ function highlightChild(child: ReactNode, usernames: Set<string>, key: number): 
   return <span key={`t-${key}`}>{parts}</span>;
 }
 
+// Formatting elements we recurse into for mentions. `code`/`pre` are
+// deliberately excluded (mentions there stay plain text).
+const TRANSPARENT_TAGS = new Set([
+  "strong",
+  "em",
+  "del",
+  "a",
+  "span",
+  "li",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "blockquote",
+  "td",
+  "th",
+  "p",
+]);
+
+function highlightNodes(nodes: ReactNode, usernames: Set<string>): ReactNode {
+  return Children.map(nodes, (child, index) => {
+    if (typeof child === "string") {
+      return highlightChild(child, usernames, index);
+    }
+    if (isValidElement(child) && typeof child.type === "string") {
+      if (!TRANSPARENT_TAGS.has(child.type)) {
+        return child;
+      }
+      const nested = (child.props as { children?: ReactNode }).children;
+      return cloneElement(
+        child as ReactElement<{ children?: ReactNode }>,
+        { key: `h-${index}` },
+        highlightNodes(nested, usernames),
+      );
+    }
+    return child;
+  });
+}
+
 /**
  * Sanitizing markdown pipeline:
  * - no raw-HTML plugin, so `<tags>` render as inert text, never elements;
  * - links allowlisted by safeUrl + rel/target hardening;
- * - @mentions of known members highlighted (top-level text only; mentions
- *   inside code/bold are left alone — "basic" per spec).
+ * - @mentions of known members highlighted in paragraphs, lists, quotes,
+ *   headings and tables (never inside code blocks).
  */
 export function MessageBody({
   content,
@@ -93,18 +140,22 @@ export function MessageBody({
           className="underline"
           style={{ color: "var(--accent)" }}
         >
-          {children}
+          {highlightNodes(children, known)}
         </a>
       );
     },
     p: ({ children }) => (
-      <p className="my-1 first:mt-0 last:mb-0">
-        {Children.map(children, (child, index) =>
-          isValidElement(child)
-            ? child
-            : highlightChild(child, known, index),
-        )}
-      </p>
+      <p className="my-1 first:mt-0 last:mb-0">{highlightNodes(children, known)}</p>
+    ),
+    li: ({ children }) => <li>{highlightNodes(children, known)}</li>,
+    h1: ({ children }) => (
+      <h1 className="my-2 text-lg font-bold">{highlightNodes(children, known)}</h1>
+    ),
+    h2: ({ children }) => (
+      <h2 className="my-2 text-base font-bold">{highlightNodes(children, known)}</h2>
+    ),
+    h3: ({ children }) => (
+      <h3 className="my-1 text-sm font-bold">{highlightNodes(children, known)}</h3>
     ),
     code: ({ children }) => (
       <code className="rounded px-1 py-0.5 font-mono text-[0.85em] [background-color:var(--surface-1)]">
@@ -118,7 +169,7 @@ export function MessageBody({
     ),
     blockquote: ({ children }) => (
       <blockquote className="my-1 border-l-2 pl-2 [border-color:var(--text-muted)]">
-        {children}
+        {highlightNodes(children, known)}
       </blockquote>
     ),
     ul: ({ children }) => <ul className="my-1 list-disc pl-5">{children}</ul>,
@@ -128,11 +179,13 @@ export function MessageBody({
     ),
     th: ({ children }) => (
       <th className="border px-2 py-1 text-left [border-color:var(--surface-1)]">
-        {children}
+        {highlightNodes(children, known)}
       </th>
     ),
     td: ({ children }) => (
-      <td className="border px-2 py-1 [border-color:var(--surface-1)]">{children}</td>
+      <td className="border px-2 py-1 [border-color:var(--surface-1)]">
+        {highlightNodes(children, known)}
+      </td>
     ),
   };
   return (
