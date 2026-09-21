@@ -79,7 +79,7 @@ export function registerChannelRoutes(app: FastifyInstance, deps: AppDeps): void
     "/api/v1/channels/:id",
     { preHandler: [authenticate] },
     async (request, reply) => {
-      await deleteChannel(db, request.userId, idParam(request, "Channel"));
+      await deleteChannel(db, app.livekit, request.userId, idParam(request, "Channel"));
       reply.code(204);
       return null;
     },

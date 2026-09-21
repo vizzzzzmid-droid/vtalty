@@ -51,7 +51,7 @@ export function registerServerRoutes(app: FastifyInstance, deps: AppDeps): void 
     "/api/v1/servers/:id",
     { preHandler: [authenticate] },
     async (request, reply) => {
-      await deleteServer(db, request.userId, serverIdParam(request));
+      await deleteServer(db, app.livekit, request.userId, serverIdParam(request));
       reply.code(204);
       return null;
     },

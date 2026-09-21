@@ -2,8 +2,10 @@ import { and, eq } from "drizzle-orm";
 import type { Db, DbOrTx } from "../../db/client.js";
 import { members, roles } from "../../db/schema.js";
 import { HttpError, forbidden, notFound } from "../../lib/errors.js";
+import type { LiveKitAdmin } from "../../lib/livekit.js";
 import { requireMembership, requirePermission } from "../../lib/permissions.js";
 import { broadcastToServers, setSubscriptions } from "../../ws/hub.js";
+import { enforceServerVoiceAccess, removeFromVoice } from "../voice/service.js";
 
 export interface MemberTarget {
   id: string;
@@ -85,6 +87,7 @@ async function findRoleInServer(
 
 export async function updateRole(
   db: Db,
+  livekit: LiveKitAdmin,
   actorId: string,
   memberId: string,
   roleId: string,
@@ -113,6 +116,8 @@ export async function updateRole(
     throw forbidden("Owners cannot change their own role");
   }
   await db.update(members).set({ roleId }).where(eq(members.id, memberId));
+  // A role change may revoke voice access: evict first, then announce.
+  await enforceServerVoiceAccess(db, livekit, target.serverId);
   await syncSubscriptions(db, target.userId);
   broadcastToServers([target.serverId], "member.role_update", {
     serverId: target.serverId,
@@ -124,6 +129,7 @@ export async function updateRole(
 
 export async function kickMember(
   db: Db,
+  livekit: LiveKitAdmin,
   actorId: string,
   memberId: string,
 ): Promise<void> {
@@ -143,6 +149,8 @@ export async function kickMember(
   if (target.userId === actorId) {
     throw forbidden("Use leave to remove yourself");
   }
+  // Drop voice first so no ghost audio survives the kick.
+  await removeFromVoice(db, livekit, target.serverId, target.userId);
   await db.delete(members).where(eq(members.id, memberId));
   await syncSubscriptions(db, target.userId);
   broadcastToServers([target.serverId], "member.leave", {
@@ -153,6 +161,7 @@ export async function kickMember(
 
 export async function leaveServer(
   db: Db,
+  livekit: LiveKitAdmin,
   userId: string,
   serverId: string,
 ): Promise<void> {
@@ -164,6 +173,7 @@ export async function leaveServer(
       "The owner cannot leave: delete the server instead",
     );
   }
+  await removeFromVoice(db, livekit, serverId, userId);
   await db.delete(members).where(eq(members.id, membership.memberId));
   await syncSubscriptions(db, userId);
   broadcastToServers([serverId], "member.leave", { serverId, userId });

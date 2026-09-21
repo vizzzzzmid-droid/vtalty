@@ -18,7 +18,7 @@ export function registerRoleRoutes(app: FastifyInstance, deps: AppDeps): void {
         throw notFound("Role not found");
       }
       const body = parseBody(patchRoleBodySchema, request.body);
-      return updateRoleFlags(db, request.userId, params.serverId, params.roleId, body.flags);
+      return updateRoleFlags(db, app.livekit, request.userId, params.serverId, params.roleId, body.flags);
     },
   );
 }

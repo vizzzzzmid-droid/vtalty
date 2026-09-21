@@ -103,6 +103,22 @@ export const voiceParticipantSchema = z.object({
   serverMuted: z.boolean(),
 });
 
+export const voiceChannelStateSchema = z.object({
+  channelId: channelIdSchema,
+  participants: z.array(voiceParticipantSchema),
+});
+
+export const voiceTokenResponseSchema = z.object({
+  token: z.string().min(1),
+  url: z.string().min(1).max(2048),
+  room: z.string().min(1).max(128),
+});
+
+export const voiceModerateBodySchema = z.object({
+  userId: userIdSchema,
+  muted: z.boolean(),
+});
+
 export type User = z.infer<typeof userSchema>;
 export type Role = z.infer<typeof roleSchema>;
 export type RoleFlags = z.infer<typeof roleFlagsSchema>;
@@ -112,6 +128,8 @@ export type ChatMessage = z.infer<typeof messageSchema>;
 export type Presence = z.infer<typeof presenceSchema>;
 export type MessageAttachment = z.infer<typeof messageAttachmentSchema>;
 export type VoiceParticipant = z.infer<typeof voiceParticipantSchema>;
+export type VoiceChannelState = z.infer<typeof voiceChannelStateSchema>;
+export type VoiceTokenResponse = z.infer<typeof voiceTokenResponseSchema>;
 
 // REST request/response DTOs (validated on the server, reused by web forms).
 
@@ -260,7 +278,7 @@ export const serverStateSchema = z.object({
   members: z.array(memberWithUserSchema),
   categories: z.array(categorySchema),
   channels: z.array(channelSchema),
-  voice: z.array(z.unknown()),
+  voice: z.array(voiceChannelStateSchema),
   readStates: z.array(z.unknown()),
 });
 

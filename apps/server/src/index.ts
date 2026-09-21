@@ -2,7 +2,9 @@ import { buildApp } from "./app.js";
 import { createDb } from "./db/client.js";
 import { runMigrations } from "./db/migrate.js";
 import { loadEnv } from "./env.js";
+import { createLiveKit } from "./lib/livekit.js";
 import { logger } from "./lib/logger.js";
+import { reconcileVoice } from "./modules/voice/service.js";
 
 async function main(): Promise<void> {
   const env = loadEnv();
@@ -11,10 +13,28 @@ async function main(): Promise<void> {
   // Migrations run on every start (fail fast on DB errors).
   await runMigrations(db);
 
-  const app = await buildApp({ env, db });
+  const livekit = createLiveKit(env);
+  const app = await buildApp({ env, db, livekit });
+
+  // Voice presence must survive restarts and missed webhooks: reconcile the
+  // in-memory store against LiveKit once at boot, then periodically.
+  try {
+    const summary = await reconcileVoice(db, livekit);
+    logger.info(summary, "voice reconcile at startup");
+  } catch (err) {
+    // LiveKit may be down; the interval below keeps retrying.
+    logger.warn({ err }, "voice reconcile at startup failed");
+  }
+  const reconcileTimer = setInterval(() => {
+    reconcileVoice(db, livekit).catch((err: unknown) => {
+      logger.warn({ err }, "periodic voice reconcile failed");
+    });
+  }, env.VOICE_RECONCILE_INTERVAL_SECONDS * 1000);
+  reconcileTimer.unref();
 
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, "shutting down");
+    clearInterval(reconcileTimer);
     await app.close();
     await close();
   };

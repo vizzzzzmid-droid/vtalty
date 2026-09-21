@@ -3,7 +3,9 @@ import type { Role, RoleFlags } from "@vitality/shared";
 import type { Db } from "../../db/client.js";
 import { roles } from "../../db/schema.js";
 import { forbidden, notFound } from "../../lib/errors.js";
+import type { LiveKitAdmin } from "../../lib/livekit.js";
 import { requireMembership } from "../../lib/permissions.js";
+import { enforceServerVoiceAccess } from "../voice/service.js";
 
 function toApiRole(row: {
   id: string;
@@ -33,6 +35,7 @@ function toApiRole(row: {
 
 export async function updateRoleFlags(
   db: Db,
+  livekit: LiveKitAdmin,
   actorId: string,
   serverId: string,
   roleId: string,
@@ -78,5 +81,7 @@ export async function updateRoleFlags(
   if (next === undefined) {
     throw notFound("Role not found");
   }
+  // Flag edits may revoke voice access: evict anyone who lost `connect`.
+  await enforceServerVoiceAccess(db, livekit, serverId);
   return toApiRole(next);
 }

@@ -8,6 +8,7 @@ import { getMembership } from "../lib/permissions.js";
 import { getChannelServerId } from "../modules/channels/service.js";
 import { getMemberServerIds } from "../modules/members/service.js";
 import { consumeWsTicket } from "../modules/ws-tickets/service.js";
+import { setMyVoiceFlags } from "../modules/voice/service.js";
 import {
   addConnection,
   broadcastToServers,
@@ -20,6 +21,8 @@ import {
 
 const typingCooldown = new Map<WebSocket, Map<string, number>>();
 const TYPING_COOLDOWN_MS = 3000;
+const voiceFlagTimestamps = new Map<WebSocket, number>();
+const VOICE_FLAG_COOLDOWN_MS = 1000;
 
 /** Per-socket, per-channel typing throttle (broadcast-storm protection). */
 function typingAllowed(socket: WebSocket, channelId: string): boolean {
@@ -85,6 +88,25 @@ async function handleIntent(
       setUserStatus(userId, intent.data.status);
       break;
     }
+    case "voice.state.update": {
+      // Client mic/deafen flags: accepted only for current participants of
+      // that channel (forging someone else's state is impossible — the
+      // user id always comes from the authenticated socket).
+      const now = Date.now();
+      const last = voiceFlagTimestamps.get(socket) ?? 0;
+      if (now - last < VOICE_FLAG_COOLDOWN_MS) {
+        break;
+      }
+      voiceFlagTimestamps.set(socket, now);
+      const accepted = await setMyVoiceFlags(deps.db, userId, intent.data.channelId, {
+        muted: intent.data.muted,
+        deafened: intent.data.deafened,
+      });
+      if (!accepted) {
+        app.log.debug("ignoring voice flags for non-participant");
+      }
+      break;
+    }
   }
 }
 
@@ -138,6 +160,7 @@ async function handleSocket(
   });
   socket.on("close", () => {
     typingCooldown.delete(socket);
+    voiceFlagTimestamps.delete(socket);
     removeConnection(socket);
   });
   socket.on("error", (err: Error) => {

@@ -8,6 +8,7 @@ import { ZodError } from "zod";
 import type { Db } from "./db/client.js";
 import type { Env } from "./env.js";
 import { HttpError } from "./lib/errors.js";
+import { createLiveKit, type LiveKitAdmin } from "./lib/livekit.js";
 import { loggerOptions } from "./lib/logger.js";
 import { registerAuthRoutes } from "./modules/auth/routes.js";
 import { registerChannelRoutes } from "./modules/channels/routes.js";
@@ -17,6 +18,7 @@ import { registerMessageRoutes } from "./modules/messages/routes.js";
 import { registerRoleRoutes } from "./modules/roles/routes.js";
 import { registerServerRoutes } from "./modules/servers/routes.js";
 import { registerUserRoutes } from "./modules/users/routes.js";
+import { registerVoiceRoutes } from "./modules/voice/routes.js";
 import { LocalStorage, type UploadStorage } from "./modules/uploads/storage.js";
 import { registerUploadRoutes } from "./modules/uploads/routes.js";
 import { registerWsTicketRoutes } from "./modules/ws-tickets/routes.js";
@@ -28,6 +30,8 @@ export interface AppDeps {
   db: Db;
   /** Overridden in tests; defaults to local disk under UPLOAD_DIR. */
   storage?: UploadStorage;
+  /** Overridden in tests with a fake; defaults to a real LiveKit client. */
+  livekit?: LiveKitAdmin;
 }
 
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
@@ -82,7 +86,18 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     limits: { fileSize: deps.env.UPLOAD_MAX_BYTES, files: 10 },
     throwFileSizeLimit: true,
   });
+  // LiveKit posts application/webhook+json; signature verification needs
+  // the exact raw bytes, so keep the body as a string (never parsed JSON).
+  app.addContentTypeParser(
+    "application/webhook+json",
+    { parseAs: "string" },
+    (request, body, done) => {
+      done(null, body);
+    },
+  );
   const storage = deps.storage ?? new LocalStorage(deps.env.UPLOAD_DIR);
+  const livekit = deps.livekit ?? createLiveKit(deps.env);
+  app.decorate("livekit", livekit);
 
   registerHealthRoutes(app, deps);
   registerAuthRoutes(app, deps);
@@ -94,6 +109,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   registerMessageRoutes(app, deps);
   registerUploadRoutes(app, { ...deps, storage });
   registerRoleRoutes(app, deps);
+  registerVoiceRoutes(app, deps);
   registerWsTicketRoutes(app, deps);
   await registerGateway(app, deps);
 

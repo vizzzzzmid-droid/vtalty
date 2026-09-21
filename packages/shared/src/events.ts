@@ -109,5 +109,11 @@ export const wsClientIntentSchema = z.discriminatedUnion("type", [
     type: z.literal("presence.update"),
     status: z.enum(["online", "idle"] as const),
   }),
+  z.object({
+    type: z.literal("voice.state.update"),
+    channelId: channelIdSchema,
+    muted: z.boolean(),
+    deafened: z.boolean(),
+  }),
 ]);
 export type WsClientIntent = z.infer<typeof wsClientIntentSchema>;

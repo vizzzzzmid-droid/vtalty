@@ -12,8 +12,10 @@ import {
   type ChannelRow,
 } from "../../db/schema.js";
 import { badRequest, conflict, notFound } from "../../lib/errors.js";
+import type { LiveKitAdmin } from "../../lib/livekit.js";
 import { requirePermission } from "../../lib/permissions.js";
 import { broadcastToServers } from "../../ws/hub.js";
+import { voiceStore } from "../voice/store.js";
 
 function toApiCategory(row: CategoryRow): Category {
   return {
@@ -230,12 +232,27 @@ export async function patchChannel(
 
 export async function deleteChannel(
   db: Db,
+  livekit: LiveKitAdmin,
   actorId: string,
   channelId: string,
 ): Promise<void> {
   const existing = await findChannelOr404(db, channelId);
   await requirePermission(db, actorId, existing.serverId, "manage_channels");
+  // Drop voice participants first so deleting a live voice channel cannot
+  // strand anyone in a room that no longer exists.
+  for (const seat of voiceStore.channelParticipants(channelId)) {
+    try {
+      await livekit.removeParticipant(channelId, seat.userId);
+    } catch {
+      // Store state below still converges; reconcile heals the rest.
+    }
+    voiceStore.remove(seat.userId);
+  }
   await db.delete(channels).where(eq(channels.id, channelId));
+  broadcastToServers([existing.serverId], "voice.state", {
+    channelId,
+    participants: [],
+  });
   broadcastToServers([existing.serverId], "channel.delete", {
     serverId: existing.serverId,
     channelId,

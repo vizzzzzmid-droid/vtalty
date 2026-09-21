@@ -18,12 +18,14 @@ import {
   users,
 } from "../../db/schema.js";
 import { HttpError, forbidden, notFound } from "../../lib/errors.js";
+import type { LiveKitAdmin } from "../../lib/livekit.js";
 import { requireMembership } from "../../lib/permissions.js";
 import {
   broadcastToServers,
   getPresenceStatus,
 } from "../../ws/hub.js";
 import { syncSubscriptions } from "../members/service.js";
+import { voiceStore } from "../voice/store.js";
 
 export interface ServerSummary {
   id: string;
@@ -298,7 +300,18 @@ export async function getServerState(
       members: memberList,
       categories,
       channels: channelList,
-      voice: [],
+      voice: channelRows
+        .filter((row) => row.type === "voice")
+        .map((row) => ({
+          channelId: row.id,
+          participants: voiceStore.channelParticipants(row.id).map((seat) => ({
+            userId: seat.userId,
+            muted: seat.muted,
+            deafened: seat.deafened,
+            sharingScreen: seat.sharingScreen,
+            serverMuted: seat.serverMuted,
+          })),
+        })),
       readStates: readRows.map((row) => ({
         channelId: row.channelId,
         lastReadMessageId: row.lastReadMessageId,
@@ -337,12 +350,33 @@ export async function patchServer(
 
 export async function deleteServer(
   db: Db,
+  livekit: LiveKitAdmin,
   userId: string,
   serverId: string,
 ): Promise<void> {
   const membership = await requireMembership(db, userId, serverId);
   if (!membership.isOwner) {
     throw forbidden("Only the owner can delete the server");
+  }
+  // Empty every voice room first: nobody may stay connected to a room whose
+  // channel is about to disappear.
+  const voiceChannels = await db
+    .select({ id: channels.id })
+    .from(channels)
+    .where(and(eq(channels.serverId, serverId), eq(channels.type, "voice")));
+  for (const channel of voiceChannels) {
+    for (const seat of voiceStore.channelParticipants(channel.id)) {
+      try {
+        await livekit.removeParticipant(channel.id, seat.userId);
+      } catch {
+        // Row deletion below wins; reconcile cannot resurrect (no channel).
+      }
+      voiceStore.remove(seat.userId);
+    }
+    broadcastToServers([serverId], "voice.state", {
+      channelId: channel.id,
+      participants: [],
+    });
   }
   const memberRows = await db
     .select({ userId: members.userId })

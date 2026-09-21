@@ -24,13 +24,14 @@ function serverIdParam(request: { params: unknown }): string {
 
 export function registerMemberRoutes(app: FastifyInstance, deps: AppDeps): void {
   const { db } = deps;
+  const livekit = app.livekit;
 
   app.patch(
     "/api/v1/members/:id",
     { preHandler: [authenticate] },
     async (request) => {
       const body = parseBody(patchMemberBodySchema, request.body);
-      return updateRole(db, request.userId, memberIdParam(request), body.roleId);
+      return updateRole(db, livekit, request.userId, memberIdParam(request), body.roleId);
     },
   );
 
@@ -38,7 +39,7 @@ export function registerMemberRoutes(app: FastifyInstance, deps: AppDeps): void 
     "/api/v1/members/:id",
     { preHandler: [authenticate] },
     async (request, reply) => {
-      await kickMember(db, request.userId, memberIdParam(request));
+      await kickMember(db, livekit, request.userId, memberIdParam(request));
       reply.code(204);
       return null;
     },
@@ -48,7 +49,7 @@ export function registerMemberRoutes(app: FastifyInstance, deps: AppDeps): void 
     "/api/v1/servers/:id/leave",
     { preHandler: [authenticate] },
     async (request, reply) => {
-      await leaveServer(db, request.userId, serverIdParam(request));
+      await leaveServer(db, livekit, request.userId, serverIdParam(request));
       reply.code(204);
       return null;
     },

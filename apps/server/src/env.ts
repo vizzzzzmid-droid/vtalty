@@ -14,6 +14,9 @@ const envSchema = z.object({
   LIVEKIT_URL: z.string().default("http://livekit:7880"),
   LIVEKIT_API_KEY: z.string().default("devkey"),
   LIVEKIT_API_SECRET: z.string().default("devsecret"),
+  LIVEKIT_PUBLIC_URL: z.string().default("wss://localhost/livekit"),
+  VOICE_MAX_PARTICIPANTS: z.coerce.number().int().positive().default(15),
+  VOICE_RECONCILE_INTERVAL_SECONDS: z.coerce.number().int().positive().default(60),
   UPLOAD_DIR: z.string().default("/data/uploads"),
   UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(10 * 1024 * 1024),
 });
