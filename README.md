@@ -46,8 +46,33 @@ flowchart LR
 ```
 
 Monorepo (`pnpm` workspaces): `apps/server` (Fastify, Drizzle, zod),
-`apps/web` (React, Vite, Tailwind, livekit-client), `packages/shared`
+`apps/web` (React, Vite, Tailwind, livekit-client), `apps/desktop`
+(Electron wrapper), `packages/shared`
 (zod protocol contract). Details: `docs/ARCHITECTURE.md`.
+
+## Download (desktop app)
+
+Prebuilt installers are attached to every `v*` GitHub Release
+(`desktop.yml` CI builds Windows NSIS + Linux AppImage).
+
+- **Windows:** the builds are unsigned, so SmartScreen shows
+  "Unknown publisher" — click *More info → Run anyway* only for binaries
+  you downloaded from our own Releases page.
+- **Localhost HTTPS:** dev servers use Caddy's internal root CA
+  (`https://localhost` warns until you trust it once — see
+  `docs/FIRST_RUN.md`). The app **never auto-accepts certificate errors**:
+  if TLS fails, the connect screen reports "unreachable" and stays put.
+- Build it yourself with one command (Windows, no Docker or bash needed):
+
+```bash
+pnpm --filter @vitality/desktop dist
+```
+
+Point a dev run at your server without the connect screen:
+
+```bash
+VITALITY_SERVER_URL=https://localhost pnpm --filter @vitality/desktop dev
+```
 
 ## Screenshots
 

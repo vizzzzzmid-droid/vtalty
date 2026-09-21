@@ -97,3 +97,29 @@ chromium --use-fake-device-for-media-stream --use-fake-ui-for-media-stream
 Used by the CI `e2e-voice` job. Fake devices grant "microphone" without
  Prompts; they do NOT produce speech-like levels, so speaking-indicator
 assertions are manual-only.
+
+## Phase 6b desktop acceptance (Electron wrapper)
+
+- [ ] Fresh launch shows the "Connect to your server" screen; `http://` remote
+      URL is rejected, `http://localhost` accepted, bad host reports unreachable
+      without navigating away.
+- [ ] After connecting, DevTools shows the window URL on the instance origin
+      (remote load, not `file://`); reload keeps the instance.
+- [ ] "Change server" (menu + tray) returns to the connect screen; recent
+      servers list + Forget work across restarts.
+- [ ] In-app link to another origin opens in the OS browser, never in the app
+      window (try a posted `https://example.com` link).
+- [ ] Screen share opens the custom picker with screen+window thumbnails;
+      cancelling denies capture; on Windows "share system audio" works,
+      on Linux/macOS capture is video-only (known limit, stated in UI).
+- [ ] Global PTT: enable in connect-screen settings, hold the key anywhere
+      (even unfocused) → talk indicator; on Wayland / macOS-without-permission
+      the UI explains the fallback (in-app PTT while focused).
+- [ ] `Ctrl+Shift+M` toggles mute globally. Minimize hides to tray; tray
+      "Show" restores; single instance (second launch focuses the first).
+- [ ] Mention while unfocused shows a native notification; badge count tracks
+      unread on supported platforms.
+- [ ] Kill the app mid-call config: window bounds + settings persist; corrupt
+      `vitality-desktop.json` falls back to defaults (no crash).
+- [ ] Self-signed `https://localhost` fails closed ("unreachable") until the
+      Caddy root CA is trusted at OS level — the app never auto-accepts certs.

@@ -21,10 +21,11 @@
 - Full plan: `docs/ARCHITECTURE.md` (read it first). Deferred items:
   `docs/ROADMAP.md`. Manual voice test checklist: `docs/MANUAL_TESTS.md`
   (from Phase 4).
-- Current phase: **Phase 6a.5 — DONE (script written + reviewed, never
-  executed: no Docker locally)**. CI `stack-smoke` (blocking) is the first
-  real execution. Next: Phase 6b Electron desktop app (starts ONLY after
-  user says "continue 6b").
+- Current phase: **Phase 6b step 1 — IN PROGRESS (uncommitted)**. Skeleton,
+  connect screen, security shell, unit tests done; steps 2–3 (picker UI in
+  web, tray/notifications polish, PTT wiring in web, packaging proof, CI
+  run, adversarial review) still pending. STOP after reporting, wait for
+  "continue".
 - Repo root moved to `vitality/` (clean dir; parent `Default Project` holds
   unrelated files). All paths below are relative to `vitality/`.
 - Local toolchain (this Windows machine): Node 24.19 + pnpm 9.15.0 via
@@ -244,7 +245,14 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   clean, 76 unit + 7 script tests green, `pnpm build`, YAML/Caddyfile
   checks, init+doctor executed, contrast computed. Docker/CI-only jobs
   (integration, e2e, smoke) still need CI/VPS.
-- [ ] Phase 6b — Electron desktop app (starts only after "continue 6b").
+- [ ] Phase 6b — Electron desktop app (step 1 done, uncommitted: skeleton,
+  connect screen, security shell, 19 unit tests, desktop.yml CI, README
+  Download section, MANUAL_TESTS desktop rows, ROADMAP Desktop section;
+  verified locally: desktop lint/typecheck/tests green, `tsc` build +
+  asset copy green. NOT verified locally: Electron runtime launch (GUI),
+  `dist` packaging, CI run — need CI/VPS. Steps 2–3 pending: web-side
+  picker/PTT/notify wiring via `window.desktop`, packaging proof, full
+  adversarial review with fixes+tests).
 
 ## 8. Known issues / risks
 

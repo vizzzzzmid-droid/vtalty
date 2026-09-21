@@ -34,3 +34,13 @@ in the code. Items move out of this file only with explicit user approval.
 - Automated backup cron + restore runbook testing.
 - Prometheus metrics endpoint + Grafana dashboard.
 - Upgrade notes per release.
+
+## Desktop
+
+- Auto-update (electron-updater): the MVP ships installers only, no update
+  channel. Decide signing (Windows EV / Apple notarization changes the
+  SmartScreen/Gatekeeper story) before wiring it.
+- macOS code signing + notarization; Linux `.deb` is built but only AppImage
+  is published in CI (verify the deb install path before advertising it).
+- Configurable global-PTT key + toggle-mute accelerator (currently fixed
+  keycode 41 / `Ctrl+Shift+M`).

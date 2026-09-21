@@ -1,0 +1,39 @@
+appId: shop.kirskiy.vitality
+productName: vitality
+copyright: Copyright © 2026 vitality contributors
+asarUnpack:
+  # uiohook-napi ships a native .node binary: keep it unpacked so the OS
+  # loader can mmap it (packed asar breaks native modules on Windows).
+  - "**/uiohook-napi*/**/*.node"
+files:
+  - dist/**
+  - package.json
+  # uiohook-napi prebuilds must ship with the app for global PTT
+  # (node-gyp-build resolves them relative to the package root).
+  - "node_modules/uiohook-napi/dist/**"
+  - "node_modules/uiohook-napi/package.json"
+  - "node_modules/uiohook-napi/prebuilds/**"
+  - "node_modules/node-gyp-build/**"
+extraMetadata:
+  main: dist/main.js
+directories:
+  output: release
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: assets/icon.ico
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: vitality
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+  icon: assets/
+  category: Network;InstantMessaging;
+  description: Self-hosted voice and text for friends

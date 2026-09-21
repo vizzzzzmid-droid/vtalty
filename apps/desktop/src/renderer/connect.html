@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>vitality — Connect</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: system-ui, sans-serif; background: #1e1f22; color: #e3e5e8; margin: 0; display: flex; min-height: 100vh; align-items: center; justify-content: center; }
+  main { width: min(480px, 92vw); background: #2b2d31; border-radius: 12px; padding: 32px; box-shadow: 0 8px 32px rgba(0,0,0,.4); }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  p.sub { margin: 0 0 20px; color: #949ba4; font-size: 14px; }
+  label { display: block; font-size: 13px; margin: 12px 0 4px; color: #b5bac1; }
+  input[type=url], input[type=text], input[type=number] { width: 100%; box-sizing: border-box; padding: 10px; border-radius: 8px; border: 1px solid #1e1f22; background: #1e1f22; color: #e3e5e8; font-size: 14px; }
+  button { cursor: pointer; border: 0; border-radius: 8px; padding: 10px 16px; font-size: 14px; background: #5865f2; color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.ghost { background: transparent; border: 1px solid #4e5058; color: #b5bac1; }
+  #error { color: #f38ba8; min-height: 20px; font-size: 13px; margin-top: 8px; }
+  ul#recent { list-style: none; padding: 0; margin: 8px 0 0; }
+  ul#recent li { display: flex; gap: 8px; align-items: center; padding: 6px 0; font-size: 13px; }
+  ul#recent code { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  fieldset { border: 1px solid #4e5058; border-radius: 8px; margin-top: 20px; padding: 12px; font-size: 13px; }
+  fieldset label { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+  footer { margin-top: 20px; font-size: 12px; color: #949ba4; }
+</style>
+</head>
+<body>
+<main>
+  <h1>vitality</h1>
+  <p class="sub">Desktop &mdash; connect to your server</p>
+  <form id="connect-form">
+    <label for="url">Server URL</label>
+    <input id="url" name="url" type="url" inputmode="url" placeholder="https://voice.example.com" autocomplete="off" spellcheck="false" required />
+    <div id="error" role="alert"></div>
+    <button id="connect-btn" type="submit">Connect</button>
+  </form>
+  <ul id="recent"></ul>
+  <fieldset>
+    <legend>Desktop settings</legend>
+    <label><input type="checkbox" id="opt-tray" /> Minimize to tray</label>
+    <label><input type="checkbox" id="opt-start-min" /> Start minimized</label>
+    <label><input type="checkbox" id="opt-ptt" /> Global push-to-talk (hold key anywhere)</label>
+    <div id="caps" style="color:#949ba4;font-size:12px;"></div>
+  </fieldset>
+  <footer id="version"></footer>
+</main>
+<script src="./connect.js"></script>
+</body>
+</html>
