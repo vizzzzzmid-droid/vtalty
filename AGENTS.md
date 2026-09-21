@@ -21,9 +21,10 @@
 - Full plan: `docs/ARCHITECTURE.md` (read it first). Deferred items:
   `docs/ROADMAP.md`. Manual voice test checklist: `docs/MANUAL_TESTS.md`
   (from Phase 4).
-- Current phase: **Phase 6a — DONE (verified locally except Docker/live
-  media/CI-only jobs)**. Next: Phase 6b Electron desktop app (starts ONLY
-  after user says "continue 6b").
+- Current phase: **Phase 6a.5 — DONE (script written + reviewed, never
+  executed: no Docker locally)**. CI `stack-smoke` (blocking) is the first
+  real execution. Next: Phase 6b Electron desktop app (starts ONLY after
+  user says "continue 6b").
 - Repo root moved to `vitality/` (clean dir; parent `Default Project` holds
   unrelated files). All paths below are relative to `vitality/`.
 - Local toolchain (this Windows machine): Node 24.19 + pnpm 9.15.0 via
@@ -214,6 +215,16 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   FIRST_RUN unchanged. Verified locally: typecheck/lint clean, unit tests
   green, `pnpm build` (+ dist wasm/worklet listing), YAML/Caddyfile checks.
   Live media, integration, e2e and compose smoke require CI/VPS.
+- [x] Phase 6a.5 — Full-stack CI proof. `scripts/smoke-stack.mjs` + blocking
+  CI `stack-smoke`: register/login/seed, WS handshake, chat, PNG
+  up/download (non-root read-only server + volume perms), voice-token,
+  Caddy `/livekit` path probe, real `@livekit/rtc-node` join+publish with
+  presence in snapshot AND `voice.state`, leave-removal, backup → destroy →
+  restore survival, restart reconcile resurrection (replaces the old
+  curl-only `compose-smoke`). `docker-compose.smoke.yml` overlay
+  (localhost-only `:7880`). Verified locally: `node --check`, dependency
+  versions, API shapes against installed packages — never executed
+  (no Docker on this box); CI is the first run.
 - [x] Phase 6a — First-run friction, polish, hardening, ops docs. `make
   init`/`make doctor` (zero-dep Node scripts, flags/prompts, 0600 secrets,
   tested via node:test + executed locally); `make backup`/`make restore`

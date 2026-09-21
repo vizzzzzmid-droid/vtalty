@@ -51,13 +51,24 @@ Legend: ✅ automated & green in CI · 🧪 automated but experimental/flaky ·
 
 ## Compose / infra (CI)
 
-- `compose` job: `docker compose config` (both files) + full image builds. ✅
-- `compose-smoke` job: `up -d --wait`, `curl -k` on `/healthz` + `/api/v1/health`, CSP-header assertion (`wasm-unsafe-eval`), logs on failure. ✅
+- `compose` job: `docker compose config` (all three files) + full image builds. ✅
+- `stack-smoke` job (BLOCKING): `scripts/smoke-stack.mjs` drives the
+  production compose stack (+ localhost-only `:7880` overlay) through the
+  public `https://localhost` entrypoint: register/login/seed state, WS
+  handshake, message send/read-back, PNG upload/download (validates the
+  non-root read-only server + volume perms), voice-token, Caddy `/livekit`
+  path probe, real LiveKit join+publish via `@livekit/rtc-node` with
+  presence asserted in snapshot AND `voice.state`, leave-removal,
+  `make backup` → volume destroy → `make restore` → survival,
+  server restart → reconcile resurrection + no ghosts, CSP-header
+  assertion. Dumps `ps` + service logs on failure. ✅
 - Production-build asset check: both worklet files + both RNNoise WASMs present in `dist/assets` (catches `?url`-inlining regressions). ✅
 
 ## Manual only (🔍 `docs/MANUAL_TESTS.md`)
 
 Real audio/video quality, echo, device switching on hardware, PTT feel,
-reconnect on real networks, TURN-behind-NAT, multi-sharer load, Enhanced
-mode on weak laptops, kick-disconnect timing, ghost healing after container
-restarts, backup/restore on a scratch VPS, first-run on Ubuntu + WSL2.
+reconnect on real networks, TURN-behind-NAT across networks, multi-sharer
+load, Enhanced mode on weak laptops, kick-disconnect timing, first-run on
+Ubuntu + WSL2. (Backup/restore and restart-reconcile are ALSO covered
+automatically by `stack-smoke`; ghost healing after container restarts is
+covered there too.)
