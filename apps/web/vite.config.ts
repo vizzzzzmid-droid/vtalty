@@ -17,5 +17,9 @@ export default defineConfig({
   build: {
     outDir: "dist",
     sourcemap: true,
+    // Never inline ?url assets as data: URLs: AudioWorklet modules must be
+    // real same-origin files (a data: URL worklet is rejected), and the WASM
+    // must stay a separate fetchable file for lazy loading.
+    assetsInlineLimit: 0,
   },
 });

@@ -7,6 +7,7 @@ in the code. Items move out of this file only with explicit user approval.
 
 - S3/MinIO upload driver (`STORAGE_DRIVER=s3`); local volume stays default.
 - CDN/cache headers for served uploads.
+- Cleanup cron for orphaned unclaimed uploads (chips removed before send).
 
 ## Voice / media
 
@@ -14,7 +15,6 @@ in the code. Items move out of this file only with explicit user approval.
 - TURN/TLS on port 443 (no-LB setups) and TURN/UDP on 443 experiments.
 - Redis for LiveKit in multi-node setups (single node needs none).
 - Transcoding / recording / egress (LiveKit Egress) — out of MVP.
-- Krisp-like third-party noise suppression — evaluate license if RNNoise path fails.
 
 ## Data model
 

@@ -346,4 +346,56 @@ describeIf("voice screen sharing", () => {
     expect(kick.statusCode).toBe(204);
     expect(await sharingOf(ctx, owner, serverId, voiceId)).toHaveLength(0);
   });
+
+  it("replays are safe and permission-less publishes are frozen", async () => {
+    const { owner, serverId, voiceId } = await fixture(ctx);
+    const friend = await joinViaInvite(ctx, owner, serverId, "friend");
+    fake.join(voiceId, friend.id, "aud-1", ["TR_friend"]);
+    await joinVoice(ctx, voiceId, friend.id);
+    const publish = trackBody("track_published", voiceId, friend.id, 3);
+    const post = async (body: string): Promise<number> =>
+      (
+        await ctx.app.inject({
+          method: "POST",
+          url: "/webhooks/livekit",
+          headers: webhookHeaders(body),
+          payload: body,
+        })
+      ).statusCode;
+    expect(await post(publish)).toBe(200);
+    // Redelivery of the same publish must not freeze the live stream.
+    expect(await post(publish)).toBe(200);
+    expect(
+      fake.muted.filter(
+        (entry) => entry.identity === friend.id && entry.trackSid === "TR_friend",
+      ),
+    ).toHaveLength(0);
+    let seats = await sharingOf(ctx, owner, serverId, voiceId);
+    expect(seats.find((entry) => entry.userId === friend.id)?.sharingScreen).toBe(true);
+
+    // Revoke share_screen: the same publish event is now frozen, not flagged.
+    const stateRes = await ctx.app.inject({
+      method: "GET",
+      url: `/api/v1/servers/${serverId}/state`,
+      headers: authHeader(owner),
+    });
+    const memberRole = serverStateSchema
+      .parse(await stateRes.json())
+      .roles.find((role) => role.name === "member");
+    await ctx.app.inject({
+      method: "PATCH",
+      url: `/api/v1/servers/${serverId}/roles/${memberRole?.id}`,
+      headers: authHeader(owner),
+      payload: { flags: { share_screen: false } },
+    });
+    // Role revocation itself stops the running share (enforce hook).
+    seats = await sharingOf(ctx, owner, serverId, voiceId);
+    expect(seats.find((entry) => entry.userId === friend.id)?.sharingScreen).toBe(false);
+    expect(fake.muted).toContainEqual({
+      room: voiceId,
+      identity: friend.id,
+      trackSid: "TR_friend",
+      muted: true,
+    });
+  });
 });

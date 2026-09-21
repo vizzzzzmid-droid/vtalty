@@ -10,7 +10,7 @@
     "lint": "eslint src tests",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "test:e2e-voice": "playwright test tests/e2e/voice.spec.ts"
+    "test:e2e-voice": "playwright test tests/e2e/voice.spec.ts tests/e2e/screen.spec.ts"
   },
   "dependencies": {
     "@fontsource/inter": "^5.0.0",

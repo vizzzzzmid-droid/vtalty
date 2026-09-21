@@ -54,6 +54,41 @@ home Wi-Fi), both logged in, both in the same voice channel.
 - [ ] Screen share button visible only in Phase 5 (currently absent).
 - [ ] Noise modes Off/Standard behave; Enhanced arrives in Phase 5.
 
+## Phase 5 acceptance (screen share)
+
+- [ ] A shares at each preset (720p30, 1080p30, 1080p60, Source): B watches
+      each; text stays readable at 1080p with Text/detail hint; motion stays
+      smooth at 1080p60 with Motion hint.
+- [ ] System/tab audio: A shares a tab with audio (Chrome checkbox) → B
+      hears it; note the browser/OS where audio capture is missing.
+- [ ] Viewer opt-in: without clicking Watch, B receives no screen bytes
+      (check `chrome://webrtc-internals`: no video inbound-rtp for the
+      screen SSRC); Stop watching cuts the bytes again.
+- [ ] Multiple sharers: A and B share at once (≤3 default cap; 4th gets
+      frozen with a notice); each tile watches independently.
+- [ ] Deafen silences stream audio too; per-stream volume + mute work.
+- [ ] Theater mode expands the tile; fullscreen fills the display; quality
+      selector Low/Medium/High/Auto visibly changes inbound resolution.
+- [ ] Sharer with poor connection shows the "degraded" hint on viewers.
+- [ ] Browser "Stop sharing" ends the stream cleanly (no ghost LIVE badge).
+- [ ] Moderator "stop stream" freezes the share; badge clears for viewers.
+
+## Phase 5 acceptance (noise suppression)
+
+- [ ] Noisy room (mechanical keyboard, fan, TV in background): Off = raw
+      noise; Standard = browser-cleaned; Enhanced = RNNoise-cleaned voice
+      with minimal artifacts. Compare with the "Hear myself" loopback
+      (headphones on!).
+- [ ] Switching modes live mid-call never drops the room and preserves mute.
+- [ ] Enhanced on a weak laptop: watch CPU in the OS monitor; acceptable =
+      no audio glitches reported by the other side.
+- [ ] Noise gate: quiet room hum gated, speech passes; threshold slider is
+      effective; gate works in every mode.
+- [ ] Mute/deafen interplay: muted + Enhanced switch keeps silence; deafen
+      silences everything including loopback.
+- [ ] Fallback: block WebAssembly in the browser (or throttle CPU) → visible
+      "fell back to Standard" notice, call continues.
+
 ## Chromium fake-media flags (for automated UI states)
 
 ```bash

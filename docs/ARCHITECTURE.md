@@ -409,38 +409,55 @@ on demand ("Watch stream" opt-in).
 
 ## 8. Screen sharing
 
-- "Share Screen" button while in voice channel. Web uses
-  `getDisplayMedia`; Electron (Phase 6) gets a custom source picker.
-- Presets: 720p30, 1080p30, 1080p60, native. `contentHint`: `detail` vs
-  `motion`. System audio capture attempted when browser/OS supports it,
-  with graceful fallback.
-- Viewers see a tile with opt-in subscribe (saves bandwidth on small VPS);
-  fullscreen + pop-out supported. Multiple simultaneous sharers supported.
-- Simulcast + dynacast/adaptive stream enabled for screen tracks.
-- Live badge next to sharer name in sidebar (from `voice.state.sharing`).
+- "Share Screen" button in the voice panel (visible only when connected and
+  the role has `share_screen`). Web uses `getDisplayMedia` via
+  `setScreenShareEnabled`; Electron (Phase 6) gets a custom source picker.
+- Presets: 720p30, 1080p30, 1080p60 (custom `VideoPreset`), Source (native);
+  `contentHint` "detail" vs "motion" toggle; `simulcast: true`,
+  `degradationPreference: "maintain-resolution"`. System/tab audio capture
+  attempted where the browser/OS supports it (`systemAudio: "include"`),
+  with graceful fallback and UI limits notes.
+- Viewers never auto-subscribe to screen tracks (unsubscribed on
+  `TrackSubscribed` unless watching): tile with "Watch stream" opt-in,
+  theater + fullscreen, per-stream volume, quality selector
+  (Auto/Low/Medium/High via `setVideoQuality`), degraded hint from live
+  connection quality. Multiple simultaneous sharers (cap
+  `VOICE_MAX_SHARERS=3`, excess frozen server-side). Deafen silences
+  screen audio too.
+- Simulcast + dynacast/adaptive stream enabled for screen tracks; bandwidth
+  math and defaults in `docs/VOICE.md`.
+- Live badge next to the sharer's name in the sidebar (from
+  `voice.state` sharing flags, webhook-driven).
 
 ## 9. Noise suppression + Voice & Audio settings
 
-Three modes (user setting, persisted to localStorage + server profile):
+Three modes (user setting, persisted to localStorage + server profile via
+`GET/PUT /api/v1/users/me/voice-settings`, which wins at boot):
 
 1. Off — raw mic.
 2. Standard — `getUserMedia` constraints (`noiseSuppression`,
    `echoCancellation`, `autoGainControl`) with individual toggles.
-3. Enhanced — RNNoise (WASM, AudioWorklet) BEFORE publish to LiveKit via
-   LiveKit track-processor API or a processed `MediaStreamTrack`.
+3. Enhanced — RNNoise (WASM, AudioWorklet) in the mic chain
+   (`getUserMedia → RNNoise → gate? → gain → analyser → destination`,
+   published as a processed track).
 
-Chosen library (to be re-verified at Phase 5 implementation time):
-`@sapphi-red/web-noise-suppressor` — MIT license, provides
-`RnnoiseWorkletNode` (+ NoiseGate/Speex/Gtcrn nodes), AudioWorklet-based,
-documented Vite `?url` usage for worklet + `.wasm` assets. Weekly downloads
-~8.6k, last release ~2 years ago (v0.3.5 at time of writing) — maintenance
-staleness is a tracked risk; fallback is Standard mode + optional noise
-gate. When Enhanced is on, browser `noiseSuppression` constraint is disabled
-to avoid double processing.
+Implemented with `@sapphi-red/web-noise-suppressor` 0.4.1 (MIT, verified
+against the installed types + Vite `?url` worklet/wasm imports; RNNoise
+core BSD-3-Clause). Requires a 48 kHz AudioContext (checked at runtime,
+fallback to Standard with notice), AudioWorklet + WASM (lazy-loaded only
+when Enhanced is selected). Build gotcha (verified): Vite inlines `?url`
+assets under 4 KiB as `data:` URLs, which AudioWorklet rejects — so
+`assetsInlineLimit: 0` forces real files (CI asserts both worklets +
+both wasms in dist). When Enhanced is on, browser
+`noiseSuppression` is forced off to avoid double processing. Mode/device
+changes rebuild the chain live without leaving the room (mute preserved).
 
-Also: noise gate / input-sensitivity slider (either the library's
-`NoiseGateWorkletNode` or a small local gate), input/output device pickers,
-mic test meter. Settings UI lives in the Settings modal → Voice & Audio.
+Also: library `NoiseGateWorkletNode`-independent local gate? No — the
+library's own `NoiseGateWorkletNode` is used (threshold slider, works in
+every mode), input volume via chain gain, mic-test meter via analyser tap,
+"Hear myself" loopback (headphone warning). CSP needs `wasm-unsafe-eval`
+(helmet merge + Caddy header for the SPA, pinned by unit test + CI smoke
+header check + CI dist asset check).
 
 ## 10. Frontend architecture (apps/web)
 

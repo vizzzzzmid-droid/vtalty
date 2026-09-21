@@ -35,6 +35,18 @@ is knowingly accepted.
 | 8 | Medium | `docker-compose.yml` (livekit healthcheck) | Probe relied on GNU wget exit code 8; busybox returns 1 for any HTTP error, so the service would never become healthy and `--wait` would hang. | Healthcheck removed with a documented reason; server deliberately does not gate on LiveKit at boot (Phase 4 adds a server-side `/readyz` check). |
 | 9 | Low | `Caddyfile` | `/healthz` and `/readyz` fell through to the web static server, so smoke probes could not reach the API. | Explicit handles proxying both to `server:3000`. |
 
+## Phase 5 screen-share / noise findings (adversarial review)
+
+| # | Severity | Location | Finding | Fix |
+|---|----------|----------|---------|-----|
+| S1 | High | `apps/server/src/modules/voice/service.ts` (track_published) | Concurrent screen publishes could both slip under the sharer cap (check-then-act across awaits). | Per-channel promise mutex around the permission + limit check (`withChannelLock`); single-process assumption documented (matches the in-memory store). |
+| S2 | Medium | same | Redelivered `track_published` for an already-flagged share re-ran the limit check and froze the victim's own live stream. | Replay short-circuit: already-sharing seats return unchanged without touching LiveKit. |
+| S3 | Medium | `enforceServerVoiceAccess` | `stopUserShare` throwing (LiveKit down) aborted role updates after the DB commit. | Best-effort try/catch in enforce (matches `removeFromVoice`); flag stays honest, re-saving retries. |
+| S4 | Info | token grants | A client without `share_screen` cannot publish screen tracks anyway: the SFU enforces `canPublishSources` server-side; our webhook additionally mutes + withholds the flag (tested). | Defense in depth, no change. |
+| S5 | Info | viewers | Subscribing to another channel's streams needs that room's token (member-only mint) and presence comes only from member-only broadcasts. | No change. |
+| S6 | Low | `Caddyfile` / helmet | WASM needs `wasm-unsafe-eval`; a missing directive fails closed (no audio processing, visible fallback) rather than open. | Policy set minimally on both layers, pinned by unit test + CI smoke header check + CI dist asset check. |
+| S7 | Low | settings endpoint | Device ids persist server-side; they are local hardware selectors, not secrets, and are only applied when the device exists. | Documented in schema comment; no change. |
+
 ## Phase 4 voice findings (adversarial review)
 
 | # | Severity | Location | Finding | Fix |

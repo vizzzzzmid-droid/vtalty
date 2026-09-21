@@ -23,8 +23,8 @@ jobs:
       - run: pnpm build
       - name: Verify worklet and WASM ship in the production build
         run: |
-          ls apps/web/dist/assets | grep -i wasm
-          ls apps/web/dist/assets | grep -i worklet
+          test "$(ls apps/web/dist/assets | grep -ci wasm)" -ge 2
+          test "$(ls apps/web/dist/assets | grep -ci worklet)" -ge 2
 
   integration:
     runs-on: ubuntu-latest

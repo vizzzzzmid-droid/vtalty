@@ -228,6 +228,12 @@ export async function handleWebhookEvent(
       // New screen share: serialize the permission + limit checks so
       // concurrent publishes cannot both slip under the cap.
       return withChannelLock(channel.id, async () => {
+        const already = voiceStore.get(channel.id, identity);
+        if (already?.sharingScreen === true) {
+          // Replay of an already-advertised share: do NOT re-run the
+          // limit check (it would freeze the user's own live stream).
+          return { event: eventName, channelId: channel.id, changed: false };
+        }
         const membership = await getMembership(db, identity, channel.serverId);
         if (membership === null || !membership.flags.share_screen) {
           // No permission (token grants should already prevent this):
@@ -525,7 +531,14 @@ export async function enforceServerVoiceAccess(
       if (membership === null || !membership.flags.connect) {
         await removeFromVoice(db, livekit, serverId, seat.userId);
       } else if (seat.sharingScreen && !membership.flags.share_screen) {
-        await stopUserShare(db, livekit, channel.id, seat.userId);
+        // Best effort like removeFromVoice: the role change already
+        // committed, and the flag stays honest (stream still flowing) if
+        // LiveKit is unreachable; re-saving the role retries.
+        try {
+          await stopUserShare(db, livekit, channel.id, seat.userId);
+        } catch {
+          // Converges on the next role save or reconcile; see note above.
+        }
       }
     }
   }

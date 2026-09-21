@@ -69,8 +69,27 @@ clients fall back to TURN/UDP or fail — everything else keeps working.
    and heals ghosts; kicked/disconnected users are force-dropped via
    `removeParticipant`.
 
-## How to test (quick)
+## Screen-share bandwidth math (read before raising limits)
 
+LiveKit is an SFU: it forwards, never transcodes. Each viewer receives
+their OWN downstream copy of every watched stream, so VPS upstream for one
+1080p60 share with N viewers ≈ N × stream bitrate. Typical screen
+bitrates (VP8/H264, LiveKit screen presets):
+
+| Preset | Resolution/fps | ~Bitrate | 3 viewers upstream | 10 viewers upstream |
+|--------|----------------|-----------|--------------------|---------------------|
+| 720p30 | 1280×720@30 | ~1.0 Mbps | ~3 Mbps | ~10 Mbps |
+| 1080p30 (default) | 1920×1080@30 | ~1.9 Mbps | ~6 Mbps | ~19 Mbps |
+| 1080p60 | 1920×1080@60 | ~3.0 Mbps | ~9 Mbps | ~30 Mbps |
+| Source | native | up to ~4+ Mbps | varies | varies |
+
+Recommendations for one small VPS: keep the default preset at 1080p30,
+`VOICE_MAX_SHARERS=3`, and viewer opt-in ("Watch stream") always on —
+unwatched streams cost the VPS nothing because viewers never subscribe.
+Audio (Opus ~32 kbps/person) is noise next to video. A 1080p60 share with
+10 viewers (~30 Mbps sustained upstream) alone can saturate a budget VPS.
+
+## How to test (quick)
 1. Two browsers (or a normal + an incognito window) on the same server.
 2. Both click the same voice channel and allow the microphone.
 3. Each sidebar shows both participants; the speaking ring follows the talker.
@@ -92,3 +111,7 @@ clients fall back to TURN/UDP or fail — everything else keeps working.
 | Join works, sidebar empty | Webhook URL unreachable from LiveKit | `livekit.yaml` webhook URL must resolve to the `server` container; check server logs for `WEBHOOK_INVALID` |
 | Echo/robot voice | Two tabs joined, or speakers feeding the mic | Close duplicate tabs; wear headphones |
 | `access_token` in Caddy logs | Misconfigured log filter | `Caddyfile` must keep the `access_token REDACTED` query filter |
+| Share button missing | Not connected, or role lacks `share_screen` | Join voice first; owner checks Members → role |
+| Stream frozen for viewers | Stopped by sharer cap or moderator | Sharer sees a notice; re-share (or ask for the cap/role) |
+| No system audio in a share | Browser/OS limitation | Chrome offers a tab-audio checkbox in the picker; Firefox/Safari may share video only |
+| Enhanced mode falls back to Standard | No 48 kHz audio, no AudioWorklet, or WASM blocked | Read the in-app notice; check browser console; verify the CSP allows `wasm-unsafe-eval` |

@@ -21,10 +21,9 @@
 - Full plan: `docs/ARCHITECTURE.md` (read it first). Deferred items:
   `docs/ROADMAP.md`. Manual voice test checklist: `docs/MANUAL_TESTS.md`
   (from Phase 4).
-- Current phase: **Phase 4 — DONE (verified locally except Docker/live
+- Current phase: **Phase 5 — DONE (verified locally except Docker/live
   media; integration, e2e-voice + compose smoke need CI/VPS)**. Next:
-  Phase 5 screen share + noise suppression (starts only after user says
-  "continue").
+  Phase 6 Electron + final docs (starts only after user says "continue").
 - Repo root moved to `vitality/` (clean dir; parent `Default Project` holds
   unrelated files). All paths below are relative to `vitality/`.
 - Local toolchain (this Windows machine): Node 24.19 + pnpm 9.15.0 via
@@ -35,7 +34,8 @@
   postgres-js 3, pino 10, TS 5.9 (NOT TS 7: typescript-eslint caps at <6.1),
   React 18.3 (spec), Vite 8 + plugin-react 6, Tailwind 4, vitest 5,
   eslint 10 + typescript-eslint 8, tsx 4, livekit-server-sdk 2.19.1,
-  livekit-client 2.22.3, livekit-server v1.13,
+  livekit-client 2.22.3, @sapphi-red/web-noise-suppressor 0.4.1,
+  livekit-server v1.13,
   postgres:16-alpine, caddy:2-alpine.
 
 ## 2. Fixed tech stack (do not substitute without asking)
@@ -122,9 +122,10 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   TURN, 5349/tcp TURN/TLS (443 if no LB), 50000–60000/udp only in
   port-range mode. `use_external_ip: true` in prod; host networking for
   LiveKit on Linux preferred.
-- Noise: Off / Standard (gUM constraints) / Enhanced (RNNoise WASM
-  AudioWorklet via `@sapphi-red/web-noise-suppressor`, MIT — re-verify at
-  Phase 5; stale-release risk tracked).
+- Noise (Phase 5 DONE): Off / Standard (gUM constraints) / Enhanced
+  (RNNoise WASM AudioWorklet via `@sapphi-red/web-noise-suppressor` 0.4.1
+  MIT, 48 kHz, lazy WASM, fallback to Standard). Screen: opt-in tiles,
+  sharer cap 3, theater/fullscreen, per-stream volume + quality.
 
 ## 7. Phase log
 
@@ -194,14 +195,30 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   media, 2-user + lurker scenario). Verified locally: typecheck/lint
   clean, 69 unit tests green, `pnpm build`. Live media, integration, e2e
   and compose smoke require CI/VPS.
-- [ ] Phase 4 — Voice (LiveKit).
-- [ ] Phase 5 — Screen share + noise suppression.
+- [x] Phase 5 — Screen share + noise suppression. Server: screen grants only
+  with `share_screen` (SFU-enforced + webhook double-check), sharer cap
+  `VOICE_MAX_SHARERS=3` (per-channel mutex, excess frozen), stop-share
+  moderation, share cleanup on kick/role-loss/channel-delete, settings
+  endpoint `GET/PUT users/me/voice-settings` (migration `0004`), CSP
+  `wasm-unsafe-eval` (helmet merge + Caddy SPA header, pinned by test + CI
+  checks). Web: share dialog (presets 720p30/1080p30/1080p60/source,
+  detail/motion, system-audio note), opt-in StreamTile (theater, fullscreen,
+  quality selector, per-stream volume, degraded hint, LIVE badges), RNNoise
+  Enhanced (48 kHz check, lazy WASM, live switching with fallback notice),
+  gate + loopback test, server-synced settings. Tests: screen grants/limit/
+  stop-share/replay integration, settings validation, screen + noise-mode
+  e2e (experimental job), MANUAL_TESTS Phase 5 rows. Docs: VOICE bandwidth
+  table, ARCHITECTURE §8/§9, SECURITY_NOTES Phase 5, ROADMAP prune,
+  FIRST_RUN unchanged. Verified locally: typecheck/lint clean, unit tests
+  green, `pnpm build` (+ dist wasm/worklet listing), YAML/Caddyfile checks.
+  Live media, integration, e2e and compose smoke require CI/VPS.
 - [ ] Phase 6 — Electron polish + e2e + final docs.
 
 ## 8. Known issues / risks
 
-- `@sapphi-red/web-noise-suppressor` last release ~2y ago — re-verify with
-  current Vite in Phase 5; fallback = Standard + noise gate.
+- `@sapphi-red/web-noise-suppressor` 0.4.1 (MIT) verified with the Vite 8
+  build (worklet + wasm ship in dist, asserted in CI); needs 48 kHz +
+  AudioWorklet + WASM, otherwise auto-falls back to Standard with notice.
 - NO local Docker on this Windows machine (Docker Desktop needs WSL2+reboot;
   skipped). Therefore `docker compose up` smoke test was NOT run here — it
   MUST be run on the Ubuntu VPS (`cp .env.example .env &&
@@ -226,7 +243,8 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
 - Unclaimed uploads (chips removed before send) stay orphaned; cleanup cron
   deferred to ROADMAP.
 - Mentions highlight only top-level paragraph text (not inside code/bold).
-- No local Docker/live media on this Windows box: voice integration tests,
-  the `e2e-voice` job and compose smoke run in CI; real two-device audio is
+- No local Docker/live media on this Windows box: voice/screen
+  integration tests, the `e2e-voice` job (now also screen + noise-mode
+  specs) and compose smoke run in CI; real two-device audio/video is
   covered by `docs/MANUAL_TESTS.md`. The CI `e2e-voice` job is
   `continue-on-error` (experimental) until it proves green.

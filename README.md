@@ -1,10 +1,9 @@
 # vitality — self-hosted voice & text for friends
 
-Phase 4: working voice channels on self-hosted LiveKit (join/leave,
-sidebar participants with speaking ring, mute/deafen, per-user volume,
-devices, push-to-talk, reconnect, admin moderation). Screen share and
-noise suppression arrive in Phase 5 — see `docs/VOICE.md` for networking
-and `docs/FIRST_RUN.md` for the first-run checklist.
+Phase 5: screen sharing (presets, opt-in watching, moderation) and noise
+suppression (Off/Standard/RNNoise Enhanced + gate + loopback test) with
+per-user Voice & Audio settings synced across devices. See `docs/VOICE.md`
+for networking and `docs/FIRST_RUN.md` for the first-run checklist.
 
 ## Quick start (full stack)
 
