@@ -1,0 +1,12 @@
+{
+  "name": "vitality",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "build": "pnpm --filter @vitality/shared build && pnpm --filter @vitality/server build && pnpm --filter @vitality/web build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm --filter @vitality/shared build && pnpm -r typecheck",
+    "test": "pnpm -r test"
+  }
+}

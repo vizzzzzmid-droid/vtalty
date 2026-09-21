@@ -1,0 +1,122 @@
+# Full production-like stack: caddy + server + web + postgres + livekit.
+# Usage:  cp .env.example .env && cp livekit.example.yaml livekit.yaml && make up
+name: vitality
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-vitality}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-vitality}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vitality} -d ${POSTGRES_DB:-vitality}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  livekit:
+    image: livekit/livekit-server:v1.13
+    command: ["--config", "/etc/livekit/livekit.yaml"]
+    volumes:
+      - ./livekit.yaml:/etc/livekit/livekit.yaml:ro
+    ports:
+      - "7881:7881/tcp" # WebRTC ICE over TCP (fallback)
+      - "7882:7882/udp" # WebRTC media (UDP mux, single port)
+      - "3478:3478/udp" # TURN/UDP (+STUN)
+      - "5349:5349/tcp" # TURN/TLS
+    healthcheck:
+      # LiveKit exposes no dedicated HTTP health endpoint on :7880, so probe
+      # the HTTP stack itself: any HTTP response (even 404 -> wget exit 8)
+      # proves the process is alive; connection refused (exit 4) does not.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:7880/ || test $$? -eq 8"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 15s
+    restart: unless-stopped
+
+  server:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    environment:
+      NODE_ENV: production
+      HOST: "0.0.0.0"
+      PORT: "3000"
+      DATABASE_URL: postgres://${POSTGRES_USER:-vitality}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-vitality}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET in .env}
+      COOKIE_SECURE: "true"
+      REGISTRATION_MODE: ${REGISTRATION_MODE:-invite-only}
+      LIVEKIT_URL: http://livekit:7880
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?set LIVEKIT_API_SECRET in .env}
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      livekit:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/healthz || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 20s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    depends_on:
+      server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:80/ || exit 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 4
+      start_period: 10s
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80/tcp"
+      - "443:443/tcp"
+      - "443:443/udp"
+    environment:
+      CADDY_DOMAIN: ${CADDY_DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      server:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    healthcheck:
+      # Caddy admin API listens on localhost:2019 by default in the official image.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:2019/config/ || exit 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 4
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+    name: vitality-pgdata
+  uploads:
+    name: vitality-uploads
+  caddy_data:
+    name: vitality-caddy-data
+  caddy_config:
+    name: vitality-caddy-config

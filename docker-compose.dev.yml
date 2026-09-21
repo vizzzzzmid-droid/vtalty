@@ -1,0 +1,43 @@
+# Dev stack: only postgres + livekit in Docker; server and web run on the host.
+# Usage:  make dev
+# Then run the server and web in separate terminals (see README).
+name: vitality-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-vitality}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-vitality}
+    ports:
+      - "5432:5432/tcp"
+    volumes:
+      - pgdata-dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vitality} -d ${POSTGRES_DB:-vitality}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  livekit:
+    image: livekit/livekit-server:v1.13
+    command: ["--config", "/etc/livekit/livekit.yaml"]
+    volumes:
+      - ./livekit.yaml:/etc/livekit/livekit.yaml:ro
+    ports:
+      - "7880:7880/tcp"
+      - "7881:7881/tcp"
+      - "7882:7882/udp"
+      - "3478:3478/udp"
+      - "5349:5349/tcp"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:7880/ || test $$? -eq 8"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 15s
+
+volumes:
+  pgdata-dev:
+    name: vitality-pgdata-dev

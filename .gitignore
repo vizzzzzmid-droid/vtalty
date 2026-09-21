@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+coverage/
+
+# Environment and secrets (never commit real values)
+.env
+.env.*.local
+
+# Generated LiveKit config (copy from livekit.example.yaml and fill secrets)
+livekit.yaml
+
+# Data volumes (bind mounts in dev)
+data/
+
+# Vite
+*.local
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

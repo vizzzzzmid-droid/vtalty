@@ -1,0 +1,38 @@
+# LiveKit config template for vitality.
+# Copy to livekit.yaml and fill the secrets (livekit.yaml is gitignored):
+#   cp livekit.example.yaml livekit.yaml
+# Key names verified against livekit/livekit config-sample.yaml (v1.13, Sep 2026).
+# Notes:
+# - `webhook` is SINGULAR with `api_key` + `urls`.
+# - `rtc.udp_port` accepts a single port (UDP mux, fewer firewall rules) or a
+#   small range such as 7882-7892. Single port 7882 chosen for a small VPS.
+# - `log_level` is a top-level key.
+# - On Linux production hosts prefer `network_mode: host` for this service
+#   (see README "WebRTC troubleshooting"); bridge mode is the portable default.
+
+port: 7880
+log_level: info
+
+bind_addresses:
+  - "0.0.0.0"
+
+rtc:
+  tcp_port: 7881
+  udp_port: 7882
+  use_external_ip: true
+
+turn:
+  enabled: true
+  udp_port: 3478
+  tls_port: 5349
+
+keys:
+  devkey: dev-livekit-secret-please-change-me-32plus
+
+room:
+  auto_create: true
+
+webhook:
+  api_key: devkey
+  urls:
+    - http://server:3000/api/v1/voice/webhook

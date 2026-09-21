@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+:root {
+  /* Original accent (violet). All brand color usage goes through this variable. */
+  --accent: #7c5cff;
+  --surface-1: #1e1f22;
+  --surface-2: #2b2d31;
+  --surface-3: #313338;
+  --text-primary: #dbdee1;
+  --text-muted: #949ba4;
+  --status-ok: #3ba55d;
+  --status-bad: #ed4245;
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background-color: var(--surface-1);
+  color: var(--text-primary);
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--surface-3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background-color: transparent;
+}

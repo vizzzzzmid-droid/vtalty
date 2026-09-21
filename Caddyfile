@@ -1,0 +1,28 @@
+# Caddy reverse proxy for vitality.
+# CADDY_DOMAIN=localhost  -> local HTTPS with Caddy internal CA (dev/smoke).
+# CADDY_DOMAIN=vitality.kirskiy.shop -> automatic public ACME certificates.
+# Requires ports 80+443 reachable from the internet for issuance.
+{
+	auto_https ignore_loaded_certs
+}
+
+{$CADDY_DOMAIN:localhost} {
+	encode gzip
+
+	handle /api/* {
+		reverse_proxy server:3000
+	}
+
+	handle /ws* {
+		reverse_proxy server:3000
+	}
+
+	# Strip the prefix: LiveKit SDK speaks at /rtc, /twirp, ... on :7880.
+	handle_path /livekit/* {
+		reverse_proxy livekit:7880
+	}
+
+	handle {
+		reverse_proxy web:80
+	}
+}
