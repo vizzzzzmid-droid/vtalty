@@ -1,0 +1,31 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "schedule": ["every weekend"],
+  "timezone": "Europe/Moscow",
+  "labels": ["dependencies"],
+  "packageRules": [
+    {
+      "description": "Refresh Docker digest pins alongside their tags",
+      "matchDatasources": ["docker"],
+      "matchUpdateTypes": ["digest"],
+      "automerge": true
+    },
+    {
+      "description": "Group LiveKit server + SDKs so voice stays consistent",
+      "matchPackageNames": [
+        "livekit/livekit-server",
+        "livekit-server-sdk",
+        "livekit-client"
+      ],
+      "groupName": "livekit"
+    },
+    {
+      "description": "Hold major upgrades for manual review",
+      "matchUpdateTypes": ["major"],
+      "automerge": false
+    }
+  ],
+  "lockFileMaintenance": { "enabled": true },
+  "prHourlyLimit": 2
+}

@@ -5,7 +5,7 @@ name: vitality-dev
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-vitality}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
@@ -21,7 +21,7 @@ services:
       retries: 10
 
   livekit:
-    image: livekit/livekit-server:v1.13
+    image: livekit/livekit-server:v1.13@sha256:6fd3b7088874c4d119160dd688798dfec852bc014786d392caad15f6f63912a3
     command: ["--config", "/etc/livekit/livekit.yaml"]
     volumes:
       - ./livekit.yaml:/etc/livekit/livekit.yaml:ro

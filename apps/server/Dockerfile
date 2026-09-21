@@ -1,5 +1,5 @@
 # vitality server image (Node.js 22 per the fixed stack).
-FROM node:22-alpine AS build
+FROM node:22-alpine@sha256:b6f26b36c8ff49624cfdac716b8ea1138d606df02586a77d364bb5536a634f85 AS build
 WORKDIR /repo
 RUN npm install --global pnpm@9.15.0
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
@@ -11,7 +11,7 @@ COPY apps/server apps/server
 RUN pnpm --filter @vitality/shared build
 RUN pnpm --filter @vitality/server build
 
-FROM node:22-alpine AS runner
+FROM node:22-alpine@sha256:b6f26b36c8ff49624cfdac716b8ea1138d606df02586a77d364bb5536a634f85 AS runner
 RUN npm install --global pnpm@9.15.0
 WORKDIR /app
 ENV NODE_ENV=production

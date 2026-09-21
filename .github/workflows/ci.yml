@@ -17,6 +17,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --audit-level=high
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
@@ -64,6 +65,14 @@ jobs:
       - run: docker compose config --quiet
       - run: docker compose -f docker-compose.dev.yml config --quiet
       - run: docker compose build
+  dependency-review:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
 
   compose-smoke:
     runs-on: ubuntu-latest

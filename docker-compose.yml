@@ -2,9 +2,22 @@
 # Usage:  cp .env.example .env && cp livekit.example.yaml livekit.yaml && make up
 name: vitality
 
+# Shared hardening: no setuid escalation, rotated json logs for every service.
+x-security: &default-security
+  security_opt:
+    - no-new-privileges:true
+
+x-logging: &default-logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
 services:
   postgres:
-    image: postgres:16-alpine
+    # Pinned by digest (see docs/ADMIN.md for the update procedure).
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-vitality}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
@@ -17,9 +30,10 @@ services:
       timeout: 3s
       retries: 10
     restart: unless-stopped
+    <<: [*default-security, *default-logging]
 
   livekit:
-    image: livekit/livekit-server:v1.13
+    image: livekit/livekit-server:v1.13@sha256:6fd3b7088874c4d119160dd688798dfec852bc014786d392caad15f6f63912a3
     command: ["--config", "/etc/livekit/livekit.yaml"]
     volumes:
       - ./livekit.yaml:/etc/livekit/livekit.yaml:ro
@@ -35,6 +49,7 @@ services:
     # The server does not depend on LiveKit at boot (Phase 4 adds a
     # server-side reachability check to /readyz instead).
     restart: unless-stopped
+    <<: [*default-security, *default-logging]
 
   server:
     build:
@@ -68,6 +83,12 @@ services:
       retries: 6
       start_period: 20s
     restart: unless-stopped
+    # Read-only root filesystem (uploads stay writable via the volume);
+    # tmpfs covers Node's temp needs. Already runs as USER node (Dockerfile).
+    read_only: true
+    tmpfs:
+      - /tmp
+    <<: [*default-security, *default-logging]
 
   web:
     build:
@@ -83,9 +104,14 @@ services:
       retries: 4
       start_period: 10s
     restart: unless-stopped
+    # Static file server only: read-only root, tmp just in case.
+    read_only: true
+    tmpfs:
+      - /tmp
+    <<: [*default-security, *default-logging]
 
   caddy:
-    image: caddy:2-alpine
+    image: caddy:2-alpine@sha256:de23def33b17fb5d1290b0f6c00a4c8a2a2fe9d355e
     ports:
       - "80:80/tcp"
       - "443:443/tcp"
@@ -109,6 +135,7 @@ services:
       retries: 4
       start_period: 10s
     restart: unless-stopped
+    <<: [*default-security, *default-logging]
 
 volumes:
   pgdata:
