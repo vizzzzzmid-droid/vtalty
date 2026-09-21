@@ -126,7 +126,7 @@ export function VoiceAudioTab(): React.JSX.Element {
           type="button"
           onClick={() => void startAudioPlayback()}
           className="rounded px-3 py-2 text-sm text-white"
-          style={{ backgroundColor: "var(--accent)" }}
+          style={{ backgroundColor: "var(--accent-strong)" }}
         >
           Click to enable audio playback
         </button>

@@ -30,7 +30,7 @@ export function ServerRail({
             }
           }}
           className="flex h-12 w-12 items-center justify-center rounded-2xl text-xl font-bold text-white"
-          style={{ backgroundColor: "var(--accent)" }}
+          style={{ backgroundColor: "var(--accent-strong)" }}
         >
           v
         </button>
@@ -50,7 +50,7 @@ export function ServerRail({
               }`}
               style={
                 selected
-                  ? { backgroundColor: "var(--accent)" }
+                  ? { backgroundColor: "var(--accent-strong)" }
                   : { backgroundColor: "var(--surface-2)" }
               }
             >

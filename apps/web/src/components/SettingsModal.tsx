@@ -77,7 +77,7 @@ function AccountTab({ user }: { user: User }): React.JSX.Element {
           type="submit"
           disabled={save.isPending}
           className="self-start rounded px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
-          style={{ backgroundColor: "var(--accent)" }}
+          style={{ backgroundColor: "var(--accent-strong)" }}
         >
           {save.isPending ? "Saving…" : "Save changes"}
         </button>

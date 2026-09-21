@@ -248,7 +248,7 @@ export function Composer({
           aria-label="Send message"
           disabled={send.isPending || uploading}
           className="rounded p-1.5 text-white disabled:opacity-50"
-          style={{ backgroundColor: "var(--accent)" }}
+          style={{ backgroundColor: "var(--accent-strong)" }}
         >
           <Send size={16} aria-hidden="true" />
         </button>

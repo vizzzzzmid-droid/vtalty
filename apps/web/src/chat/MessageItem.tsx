@@ -149,8 +149,8 @@ export function MessageItem({
               <button
                 type="submit"
                 disabled={saveEdit.isPending}
-                className="rounded px-2 py-0.5 text-white disabled:opacity-60"
-                style={{ backgroundColor: "var(--accent)" }}
+              className="rounded px-2 py-0.5 text-white disabled:opacity-60"
+              style={{ backgroundColor: "var(--accent-strong)" }}
               >
                 Save
               </button>

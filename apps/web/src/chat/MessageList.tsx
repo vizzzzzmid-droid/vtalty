@@ -133,6 +133,31 @@ export function MessageList({
       className="flex-1 overflow-y-auto py-2"
     >
       <div ref={sentinelRef} aria-hidden="true" className="h-px" />
+      {history.isPending ? (
+        <div role="status" aria-label="Loading messages" className="flex flex-col gap-2 px-4 py-2">
+          {[0, 1, 2].map((index) => (
+            <div
+              key={index}
+              aria-hidden="true"
+              className="h-10 animate-pulse rounded [background-color:var(--surface-2)]"
+            />
+          ))}
+        </div>
+      ) : null}
+      {history.isError ? (
+        <div className="flex flex-col items-center gap-2 px-4 py-6 text-center">
+          <p role="alert" className="text-sm text-red-400">
+            Could not load messages.
+          </p>
+          <button
+            type="button"
+            onClick={() => void history.refetch()}
+            className="rounded px-3 py-1 text-xs [background-color:var(--surface-2)] hover:brightness-110"
+          >
+            Retry
+          </button>
+        </div>
+      ) : null}
       {history.isFetchingNextPage ? (
         <p role="status" className="py-2 text-center text-xs [color:var(--text-muted)]">
           Loading older messages…

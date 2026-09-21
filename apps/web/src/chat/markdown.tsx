@@ -44,7 +44,7 @@ function splitMentions(text: string, usernames: Set<string>): ReactNode[] {
       <span
         key={`m-${key++}`}
         className="rounded px-0.5 font-medium"
-        style={{ backgroundColor: "var(--accent)", color: "#fff" }}
+        style={{ backgroundColor: "var(--accent-strong)", color: "#fff" }}
       >
         @{name}
       </span>,

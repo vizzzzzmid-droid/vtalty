@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.tests.json",
     "lint": "eslint src tests",
     "test": "vitest run",
-    "test:e2e": "playwright test",
+    "test:e2e": "playwright test tests/e2e/chat.spec.ts tests/e2e/a11y.spec.ts",
     "test:e2e-voice": "playwright test tests/e2e/voice.spec.ts tests/e2e/screen.spec.ts"
   },
   "dependencies": {
@@ -32,6 +32,7 @@
     "zustand": "5.0.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
     "@playwright/test": "1.63.0",
     "@tailwindcss/vite": "^4.0.0",
     "@types/node": "^22.0.0",

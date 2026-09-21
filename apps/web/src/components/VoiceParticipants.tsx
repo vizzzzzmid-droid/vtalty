@@ -150,7 +150,7 @@ function ParticipantRow({
         <span
           aria-label={`${name} is sharing live`}
           className="shrink-0 rounded px-1 py-px text-[10px] font-bold text-white"
-          style={{ backgroundColor: "#ed4245" }}
+          style={{ backgroundColor: "var(--live)" }}
         >
           LIVE
         </span>

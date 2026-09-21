@@ -189,7 +189,7 @@ export function InvitesTab({ state }: { state: ServerState }): React.JSX.Element
           type="submit"
           disabled={create.isPending}
           className="self-start rounded px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
-          style={{ backgroundColor: "var(--accent)" }}
+          style={{ backgroundColor: "var(--accent-strong)" }}
         >
           {create.isPending ? "Creating…" : "Create invite"}
         </button>

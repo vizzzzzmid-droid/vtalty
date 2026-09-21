@@ -42,7 +42,7 @@ export function MainView({
           <span
             aria-label={`${sharers.length} live streams`}
             className="rounded px-1.5 py-0.5 text-[10px] font-bold text-white"
-            style={{ backgroundColor: "#ed4245" }}
+            style={{ backgroundColor: "var(--live)" }}
           >
             {sharers.length} LIVE
           </span>

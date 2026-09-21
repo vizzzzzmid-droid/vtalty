@@ -1,13 +1,16 @@
 @import "tailwindcss";
 
 :root {
-  /* Original accent (violet). All brand color usage goes through this variable. */
-  --accent: #7c5cff;
+  /* Original accent (violet). --accent is text/ring-safe on dark surfaces;
+     --accent-strong is the fill for white-text buttons/badges (AA both). */
+  --accent: #8f7bff;
+  --accent-strong: #6a58e8;
+  --live: #c93a3e;
   --surface-1: #1e1f22;
   --surface-2: #2b2d31;
   --surface-3: #313338;
   --text-primary: #dbdee1;
-  --text-muted: #949ba4;
+  --text-muted: #a0a7b1;
   --status-ok: #3ba55d;
   --status-bad: #ed4245;
   color-scheme: dark;
@@ -37,4 +40,13 @@ body {
 
 ::-webkit-scrollbar-track {
   background-color: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

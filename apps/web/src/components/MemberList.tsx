@@ -6,6 +6,7 @@ import { kickMember, patchMember } from "../api/resources.js";
 import { displayNameOf } from "../lib/format.js";
 import { myAccess } from "../lib/membership.js";
 import { usePresenceStore } from "../store/presence.js";
+import { useUiStore } from "../store/ui.js";
 import { Avatar } from "./Avatar.js";
 
 function statusColor(status: string): string {
@@ -37,17 +38,23 @@ function MemberRow({
     (state) => state.statuses[member.userId] ?? "offline",
   );
   const serverId = member.serverId;
+  const pushToast = useUiStore((state) => state.pushToast);
+  const fail = (action: string) => ({
+    onError: () => pushToast(`${action} failed. Try again.`),
+  });
   const promote = useMutation({
     mutationFn: (roleId: string) => patchMember(member.id, roleId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["state", serverId] });
     },
+    ...fail("Role change"),
   });
   const kick = useMutation({
     mutationFn: () => kickMember(member.id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["state", serverId] });
     },
+    ...fail("Kick"),
   });
 
   const actionable = canManage && !isSelf && !isOwnerRow;

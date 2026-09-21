@@ -1,10 +1,12 @@
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { useQuery } from "@tanstack/react-query";
-import { Suspense, lazy, useEffect } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { Menu, Users } from "lucide-react";
 import { fetchServers, fetchState, fetchUnread } from "./api/resources.js";
 import { AuthPage } from "./components/AuthPage.js";
 import { ChannelSidebar } from "./components/ChannelSidebar.js";
+import { QuickSwitcher } from "./components/QuickSwitcher.js";
+import { OfflineBanner, Toaster, VoiceAnnouncer } from "./components/notifications.js";
 import { MainView } from "./components/MainView.js";
 import { MemberList } from "./components/MemberList.js";
 import { ServerRail } from "./components/ServerRail.js";
@@ -49,6 +51,19 @@ function Shell(): React.JSX.Element {
   const setMobileNav = useUiStore((state) => state.setMobileNav);
   const mobileMembersOpen = useUiStore((state) => state.mobileMembersOpen);
   const setMobileMembers = useUiStore((state) => state.setMobileMembers);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+
+  // Ctrl+K / Cmd+K quick channel switcher.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if ((event.ctrlKey || event.metaKey) && event.code === "KeyK") {
+        event.preventDefault();
+        setSwitcherOpen((open) => !open);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const serversQuery = useQuery({ queryKey: ["servers"], queryFn: fetchServers });
 
@@ -149,10 +164,24 @@ function Shell(): React.JSX.Element {
 
       {state === null ? (
         <div className="flex flex-1 items-center justify-center px-6">
-          {stateQuery.isPending ? (
+          {stateQuery.isPending || serversQuery.isPending ? (
             <p role="status" className="text-sm [color:var(--text-muted)]">
               Loading server…
             </p>
+          ) : serversQuery.isError ? (
+            <div className="flex max-w-sm flex-col items-center gap-3 text-center">
+              <p role="alert" className="text-sm text-red-400">
+                Could not load your servers. Check your connection and retry.
+              </p>
+              <button
+                type="button"
+                onClick={() => void serversQuery.refetch()}
+                className="rounded px-4 py-2 text-sm text-white"
+                style={{ backgroundColor: "var(--accent-strong)" }}
+              >
+                Retry
+              </button>
+            </div>
           ) : (
             <div className="flex max-w-sm flex-col items-center gap-3 text-center">
               <p className="text-sm [color:var(--text-muted)]">
@@ -165,7 +194,7 @@ function Shell(): React.JSX.Element {
                   type="button"
                   onClick={() => selectServer(null)}
                   className="rounded px-4 py-2 text-sm text-white"
-                  style={{ backgroundColor: "var(--accent)" }}
+                  style={{ backgroundColor: "var(--accent-strong)" }}
                 >
                   Back to servers
                 </button>
@@ -192,6 +221,7 @@ function Shell(): React.JSX.Element {
             />
           </div>
           <div className="flex min-w-0 flex-1 flex-col">
+            <OfflineBanner />
             {needsAudioGesture ? (
               <div className="flex shrink-0 items-center justify-center gap-2 bg-amber-900/40 px-3 py-1.5 text-xs">
                 <span>Your browser blocked audio playback.</span>
@@ -199,7 +229,7 @@ function Shell(): React.JSX.Element {
                   type="button"
                   onClick={() => void startAudioPlayback()}
                   className="rounded px-2 py-0.5 text-white"
-                  style={{ backgroundColor: "var(--accent)" }}
+                  style={{ backgroundColor: "var(--accent-strong)" }}
                 >
                   Click to enable audio
                 </button>
@@ -286,6 +316,15 @@ function Shell(): React.JSX.Element {
       <Suspense fallback={null}>
         <SettingsModal state={state} myUserId={user.id} />
       </Suspense>
+      {state !== null ? (
+        <QuickSwitcher
+          open={switcherOpen}
+          onClose={() => setSwitcherOpen(false)}
+          state={state}
+        />
+      ) : null}
+      <VoiceAnnouncer state={state} />
+      <Toaster />
       {serversQuery.isError ? (
         <button
           type="button"

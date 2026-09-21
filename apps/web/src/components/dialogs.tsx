@@ -11,6 +11,7 @@ import {
   patchCategory,
   patchChannel,
 } from "../api/resources.js";
+import { ApiError } from "../api/http.js";
 import { Field, inputClass } from "./ui.js";
 
 function Shell({
@@ -55,11 +56,26 @@ function SubmitRow({ label, pending }: { label: string; pending: boolean }): Rea
       type="submit"
       disabled={pending}
       className="mt-1 rounded px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
-      style={{ backgroundColor: "var(--accent)" }}
+      style={{ backgroundColor: "var(--accent-strong)" }}
     >
       {pending ? "Saving…" : label}
     </button>
   );
+}
+
+function DialogError({ message }: { message: string | null }): ReactNode {
+  if (message === null) {
+    return null;
+  }
+  return (
+    <p role="alert" className="text-sm text-red-400">
+      {message}
+    </p>
+  );
+}
+
+function mutationErrorMessage(err: unknown): string {
+  return err instanceof ApiError ? err.message : "Something went wrong";
 }
 
 export function CreateServerDialog({
@@ -72,14 +88,17 @@ export function CreateServerDialog({
   onCreated: (id: string) => void;
 }): ReactNode {
   const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const mutation = useMutation({
     mutationFn: () => createServer(name.trim()),
     onSuccess: (server) => {
       void queryClient.invalidateQueries({ queryKey: ["servers"] });
       setName("");
+      setError(null);
       onClose();
       onCreated(server.id);
     },
+    onError: (err) => setError(mutationErrorMessage(err)),
   });
   return (
     <Dialog.Root
@@ -111,6 +130,7 @@ export function CreateServerDialog({
               placeholder="friends"
             />
           </Field>
+          <DialogError message={error} />
           <SubmitRow label="Create" pending={mutation.isPending} />
         </Shell>
       </Dialog.Portal>
@@ -130,6 +150,7 @@ export function CategoryDialog({
   onClose: () => void;
 }): ReactNode {
   const [name, setName] = useState(initial?.name ?? "");
+  const [error, setError] = useState<string | null>(null);
   const mutation = useMutation({
     mutationFn: () => {
       const trimmed = name.trim();
@@ -140,8 +161,10 @@ export function CategoryDialog({
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["state", serverId] });
       setName("");
+      setError(null);
       onClose();
     },
+    onError: (err) => setError(mutationErrorMessage(err)),
   });
   return (
     <Dialog.Root
@@ -172,6 +195,7 @@ export function CategoryDialog({
               onChange={(event) => setName(event.target.value)}
             />
           </Field>
+          <DialogError message={error} />
           <SubmitRow label={initial === undefined ? "Create" : "Save"} pending={mutation.isPending} />
         </Shell>
       </Dialog.Portal>
@@ -194,6 +218,7 @@ export function ChannelDialog({
 }): ReactNode {
   const [name, setName] = useState(initial?.name ?? "");
   const [channelType, setChannelType] = useState<ChannelType>("text");
+  const [error, setError] = useState<string | null>(null);
   const mutation = useMutation({
     mutationFn: () => {
       const trimmed = name.trim();
@@ -208,8 +233,10 @@ export function ChannelDialog({
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["state", serverId] });
       setName("");
+      setError(null);
       onClose();
     },
+    onError: (err) => setError(mutationErrorMessage(err)),
   });
   return (
     <Dialog.Root
@@ -260,6 +287,7 @@ export function ChannelDialog({
               ))}
             </fieldset>
           ) : null}
+          <DialogError message={error} />
           <SubmitRow label={initial === undefined ? "Create" : "Save"} pending={mutation.isPending} />
         </Shell>
       </Dialog.Portal>

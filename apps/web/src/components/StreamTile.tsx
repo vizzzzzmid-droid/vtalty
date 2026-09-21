@@ -73,7 +73,7 @@ export function StreamTile({
           <span
             aria-label="Live stream"
             className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold text-white"
-            style={{ backgroundColor: "#ed4245" }}
+            style={{ backgroundColor: "var(--live)" }}
           >
             LIVE
           </span>
@@ -85,7 +85,7 @@ export function StreamTile({
           type="button"
           onClick={() => startWatching(sharerId)}
           className="shrink-0 rounded px-3 py-1 text-xs font-medium text-white"
-          style={{ backgroundColor: "var(--accent)" }}
+          style={{ backgroundColor: "var(--accent-strong)" }}
         >
           Watch stream
         </button>

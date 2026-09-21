@@ -78,7 +78,7 @@ function ChannelRow({
         <span
           aria-label={`${mentions} mentions in ${channel.name}`}
           className="shrink-0 rounded-full px-1.5 text-[11px] font-semibold text-white"
-          style={{ backgroundColor: "var(--accent)" }}
+          style={{ backgroundColor: "var(--accent-strong)" }}
         >
           @{mentions}
         </span>

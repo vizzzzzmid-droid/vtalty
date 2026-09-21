@@ -40,6 +40,11 @@ function readCollapsed(): Record<string, boolean> {
   }
 }
 
+interface Toast {
+  id: number;
+  message: string;
+}
+
 interface UiState {
   selectedServerId: string | null;
   selectedChannelId: string | null;
@@ -48,13 +53,18 @@ interface UiState {
   collapsedCategories: Record<string, boolean>;
   mobileNavOpen: boolean;
   mobileMembersOpen: boolean;
+  toasts: Toast[];
   selectServer: (id: string | null) => void;
   selectChannel: (id: string | null) => void;
   setSettings: (open: boolean, tab?: string) => void;
   toggleCategory: (id: string) => void;
   setMobileNav: (open: boolean) => void;
   setMobileMembers: (open: boolean) => void;
+  pushToast: (message: string) => void;
+  dismissToast: (id: number) => void;
 }
+
+let toastId = 0;
 
 export const useUiStore = create<UiState>()((set) => ({
   selectedServerId: read(SELECTED_SERVER_KEY),
@@ -99,4 +109,15 @@ export const useUiStore = create<UiState>()((set) => ({
     }),
   setMobileNav: (open) => set({ mobileNavOpen: open }),
   setMobileMembers: (open) => set({ mobileMembersOpen: open }),
+  toasts: [],
+  pushToast: (message) => {
+    toastId += 1;
+    const id = toastId;
+    set((state) => ({ toasts: [...state.toasts.slice(-3), { id, message }] }));
+    setTimeout(() => {
+      useUiStore.getState().dismissToast(id);
+    }, 5000);
+  },
+  dismissToast: (id) =>
+    set((state) => ({ toasts: state.toasts.filter((toast) => toast.id !== id) })),
 }));

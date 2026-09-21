@@ -144,7 +144,7 @@ export function AuthPage(): React.JSX.Element {
               type="submit"
               disabled={pending}
               className="rounded px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
-              style={{ backgroundColor: "var(--accent)" }}
+              style={{ backgroundColor: "var(--accent-strong)" }}
             >
               {pending ? "Please wait…" : tab === "login" ? "Log in" : "Register"}
             </button>
