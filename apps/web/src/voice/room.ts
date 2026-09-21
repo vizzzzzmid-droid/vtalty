@@ -1,0 +1,431 @@
+import {
+  ConnectionState,
+  Room,
+  RoomEvent,
+  Track,
+  type Participant,
+  type RemoteParticipant,
+  type RemoteTrackPublication,
+} from "livekit-client";
+import { ApiError } from "../api/http.js";
+import { requestVoiceToken } from "../api/resources.js";
+import { sendVoiceFlags } from "../ws/socket.js";
+import { buildMicChain, type MicChain } from "./chain.js";
+import { useVoiceConnection } from "./store.js";
+import { useVoiceSettings } from "./settings.js";
+import { voiceSounds } from "./sounds.js";
+import type { LocalTrackPublication } from "livekit-client";
+
+let room: Room | null = null;
+let chain: MicChain | null = null;
+let micPublication: LocalTrackPublication | null = null;
+let intentionalDisconnect = false;
+let qualityTimer: ReturnType<typeof setInterval> | null = null;
+let lastAnnounced = "";
+const attached: [RoomEvent, (...args: never[]) => void][] = [];
+
+function snapshot() {
+  return useVoiceConnection.getState();
+}
+
+/** Audibility: deafened implies muted; PTT gates the mic when enabled. */
+function isAudible(): boolean {
+  const s = snapshot();
+  const prefs = useVoiceSettings.getState();
+  return !s.selfDeafened && !s.selfMuted && (!prefs.pttEnabled || s.pttActive);
+}
+
+function applyMicGate(): void {
+  if (chain !== null) {
+    chain.track.enabled = isAudible();
+  }
+}
+
+function announce(): void {
+  const s = snapshot();
+  if (s.channelId === null) {
+    return;
+  }
+  const key = `${String(!isAudible())}:${String(s.selfDeafened)}`;
+  if (key === lastAnnounced) {
+    return;
+  }
+  lastAnnounced = key;
+  sendVoiceFlags(s.channelId, !isAudible(), s.selfDeafened);
+}
+
+function applyDeafenSubscriptions(deafened: boolean): void {
+  if (room === null) {
+    return;
+  }
+  for (const participant of room.remoteParticipants.values()) {
+    for (const publication of participant.audioTrackPublications.values()) {
+      (publication as RemoteTrackPublication).setSubscribed(!deafened);
+    }
+  }
+}
+
+function applyAllVolumes(): void {
+  if (room === null) {
+    return;
+  }
+  const volumes = useVoiceSettings.getState().userVolumes;
+  for (const participant of room.remoteParticipants.values()) {
+    const volume = volumes[participant.identity];
+    if (volume !== undefined) {
+      (participant as RemoteParticipant).setVolume(volume);
+    }
+  }
+}
+
+export function applyUserVolume(userId: string, volume: number): void {
+  if (room === null) {
+    return;
+  }
+  for (const participant of room.remoteParticipants.values()) {
+    if (participant.identity === userId) {
+      (participant as RemoteParticipant).setVolume(volume);
+    }
+  }
+}
+
+function sampleQuality(): void {
+  if (room === null) {
+    return;
+  }
+  snapshot().set({ connectionQuality: room.localParticipant.connectionQuality });
+}
+
+function startQualityTimer(): void {
+  stopQualityTimer();
+  qualityTimer = setInterval(sampleQuality, 5000);
+}
+
+function stopQualityTimer(): void {
+  if (qualityTimer !== null) {
+    clearInterval(qualityTimer);
+    qualityTimer = null;
+  }
+}
+
+function on(target: Room, event: RoomEvent, handler: (...args: never[]) => void): void {
+  // Room.on is strictly typed per event (typed-emitter); dynamic
+  // registration for teardown goes through this narrow structural cast.
+  const emitter = target as unknown as {
+    on(event: RoomEvent, cb: (...args: never[]) => void): void;
+    off(event: RoomEvent, cb: (...args: never[]) => void): void;
+  };
+  emitter.on(event, handler);
+  attached.push([event, handler]);
+}
+
+function detachAll(target: Room): void {
+  const emitter = target as unknown as {
+    off(event: RoomEvent, cb: (...args: never[]) => void): void;
+  };
+  for (const [event, handler] of attached.splice(0)) {
+    emitter.off(event, handler);
+  }
+}
+
+function attachHandlers(next: Room): void {
+  on(next, RoomEvent.ConnectionStateChanged, (connState: ConnectionState) => {
+    const s = snapshot();
+    if (connState === ConnectionState.Connected) {
+      s.set({ status: "connected", error: null });
+      sampleQuality();
+      announce();
+    } else if (
+      connState === ConnectionState.Reconnecting ||
+      connState === ConnectionState.SignalReconnecting
+    ) {
+      s.set({ status: "reconnecting" });
+    } else if (connState === ConnectionState.Disconnected && !intentionalDisconnect) {
+      s.set({ status: "failed", error: "Voice connection lost. Rejoin to try again." });
+    }
+  });
+  on(next, RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
+    snapshot().set({ speakingIds: speakers.map((speaker) => speaker.identity) });
+  });
+  on(next, RoomEvent.ParticipantConnected, () => {
+    if (snapshot().status === "connected") {
+      voiceSounds.join();
+    }
+  });
+  on(next, RoomEvent.ParticipantDisconnected, () => {
+    if (snapshot().status === "connected") {
+      voiceSounds.leave();
+    }
+  });
+  on(
+    next,
+    RoomEvent.TrackSubscribed,
+    (track: Track, _publication: unknown, participant: Participant) => {
+      if (snapshot().selfDeafened && track.kind === Track.Kind.Audio) {
+        (_publication as RemoteTrackPublication).setSubscribed(false);
+      }
+      const volume = useVoiceSettings.getState().userVolumes[participant.identity];
+      if (volume !== undefined) {
+        (participant as RemoteParticipant).setVolume(volume);
+      }
+    },
+  );
+  on(next, RoomEvent.AudioPlaybackStatusChanged, (playing: boolean) => {
+    snapshot().set({ needsAudioGesture: !playing });
+  });
+}
+
+function describeJoinError(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.code === "CHANNEL_FULL") {
+      return "This voice channel is full.";
+    }
+    if (err.status === 403) {
+      return "You don't have permission to join this voice channel.";
+    }
+    if (err.status === 404) {
+      return "This voice channel no longer exists.";
+    }
+    return err.message;
+  }
+  if (err instanceof DOMException) {
+    switch (err.name) {
+      case "NotAllowedError":
+      case "SecurityError":
+        return "Microphone access was blocked. Allow it in the browser address bar and retry.";
+      case "NotFoundError":
+      case "OverconstrainedError":
+        return "No microphone found. Plug one in or pick another input in Settings.";
+      case "NotReadableError":
+        return "The microphone is already in use by another app.";
+      case "AbortError":
+        return "Join cancelled. Try again.";
+      default:
+        break;
+    }
+  }
+  return "Could not join voice (network?). Check your connection and retry.";
+}
+
+async function teardownRoom(): Promise<void> {
+  intentionalDisconnect = true;
+  stopQualityTimer();
+  const current = room;
+  room = null;
+  micPublication = null;
+  if (current !== null) {
+    detachAll(current);
+    try {
+      await current.disconnect();
+    } catch {
+      // Already gone; presence converges via webhook.
+    }
+  }
+  if (chain !== null) {
+    chain.cleanup();
+    chain = null;
+  }
+}
+
+export function isVoiceConnected(): boolean {
+  return room !== null && snapshot().status === "connected";
+}
+
+export function currentVoiceChannel(): string | null {
+  return snapshot().channelId;
+}
+
+export async function joinVoiceChannel(channelId: string): Promise<void> {
+  const s = snapshot();
+  if (
+    s.status === "connecting" ||
+    (s.status === "connected" && s.channelId === channelId)
+  ) {
+    return;
+  }
+  if (room !== null) {
+    await teardownRoom();
+  }
+  s.set({ status: "connecting", channelId, error: null, speakingIds: [] });
+  intentionalDisconnect = false;
+  lastAnnounced = "";
+  try {
+    const invitation = await requestVoiceToken(channelId);
+    // Build the mic chain BEFORE connecting: device errors then fail fast
+    // without a ghost join, and the chain shape is Phase 5-ready (RNNoise
+    // will slot in before the gain node).
+    const prefs = useVoiceSettings.getState();
+    const mic = await buildMicChain({
+      deviceId: prefs.inputDeviceId,
+      noiseMode: prefs.noiseMode,
+      noiseSuppression: prefs.noiseSuppression,
+      echoCancellation: prefs.echoCancellation,
+      autoGainControl: prefs.autoGainControl,
+      inputVolume: prefs.inputVolume,
+    });
+    chain = mic;
+    const next = new Room({ adaptiveStream: true, dynacast: true });
+    room = next;
+    attachHandlers(next);
+    await next.connect(invitation.url, invitation.token);
+    try {
+      micPublication = await next.localParticipant.publishTrack(mic.track, {
+        source: Track.Source.Microphone,
+      });
+    } catch {
+      // Listen-only grants (or revoked speak): stay connected, listen only.
+      snapshot().set({ error: "Connected listen-only: publishing was refused." });
+    }
+    const outputId = useVoiceSettings.getState().outputDeviceId;
+    if (outputId !== null) {
+      await next.switchActiveDevice("audiooutput", outputId).catch(() => false);
+    }
+    applyAllVolumes();
+    applyDeafenSubscriptions(snapshot().selfDeafened);
+    applyMicGate();
+    announce();
+    snapshot().set({ status: "connected", error: snapshot().error });
+    sampleQuality();
+    startQualityTimer();
+    voiceSounds.join();
+  } catch (err) {
+    await teardownRoom();
+    snapshot().set({ status: "failed", channelId, error: describeJoinError(err) });
+  }
+}
+
+export async function leaveVoiceChannel(): Promise<void> {
+  await teardownRoom();
+  snapshot().set({
+    status: "idle",
+    channelId: null,
+    error: null,
+    speakingIds: [],
+    pttActive: false,
+  });
+  voiceSounds.leave();
+}
+
+export async function setSelfMuted(muted: boolean): Promise<void> {
+  const s = snapshot();
+  if (s.selfMuted === muted) {
+    return;
+  }
+  s.set({ selfMuted: muted });
+  if (muted) {
+    voiceSounds.mute();
+  } else {
+    voiceSounds.unmute();
+  }
+  applyMicGate();
+  announce();
+}
+
+export async function setSelfDeafened(deafened: boolean): Promise<void> {
+  const s = snapshot();
+  if (s.selfDeafened === deafened) {
+    return;
+  }
+  if (deafened) {
+    s.set({ selfDeafened: true, preDeafenMuted: s.selfMuted });
+    voiceSounds.deafen();
+  } else {
+    s.set({ selfDeafened: false, selfMuted: s.preDeafenMuted });
+    voiceSounds.undeafen();
+  }
+  applyDeafenSubscriptions(deafened);
+  applyMicGate();
+  announce();
+}
+
+export function setPttActive(active: boolean): void {
+  const s = snapshot();
+  if (s.pttActive === active) {
+    return;
+  }
+  s.set({ pttActive: active });
+  applyMicGate();
+  announce();
+}
+
+export async function setInputVolume(volume: number): Promise<void> {
+  useVoiceSettings.getState().set({ inputVolume: volume });
+  chain?.setVolume(volume);
+}
+
+/** Rebuild the mic chain (device/mode change) without leaving the room. */
+export async function rebuildMicChain(): Promise<void> {
+  if (room === null || chain === null) {
+    return;
+  }
+  const prefs = useVoiceSettings.getState();
+  const fresh = await buildMicChain({
+    deviceId: prefs.inputDeviceId,
+    noiseMode: prefs.noiseMode,
+    noiseSuppression: prefs.noiseSuppression,
+    echoCancellation: prefs.echoCancellation,
+    autoGainControl: prefs.autoGainControl,
+    inputVolume: prefs.inputVolume,
+  });
+  const previous = chain;
+  const previousPublication = micPublication;
+  chain = fresh;
+  try {
+    micPublication = await room.localParticipant.publishTrack(fresh.track, {
+      source: Track.Source.Microphone,
+    });
+  } catch (err) {
+    chain = previous;
+    fresh.cleanup();
+    throw err;
+  }
+  if (previousPublication !== null) {
+    try {
+      await room.localParticipant.unpublishTrack(previous.track, true);
+    } catch {
+      // Old track already gone; the new one is live.
+    }
+  }
+  previous.cleanup();
+  applyMicGate();
+}
+
+export async function setOutputDevice(deviceId: string | null): Promise<boolean> {
+  useVoiceSettings.getState().set({ outputDeviceId: deviceId });
+  if (room === null || deviceId === null) {
+    return true;
+  }
+  return room.switchActiveDevice("audiooutput", deviceId);
+}
+
+export async function listInputDevices(): Promise<MediaDeviceInfo[]> {
+  return Room.getLocalDevices("audioinput");
+}
+
+export async function listOutputDevices(): Promise<MediaDeviceInfo[]> {
+  return Room.getLocalDevices("audiooutput");
+}
+
+export async function startAudioPlayback(): Promise<void> {
+  if (room !== null) {
+    await room.startAudio();
+  }
+}
+
+let unloadArmed = false;
+
+/** Best-effort leave on tab close (the server converges via webhook). */
+export function armUnloadCleanup(): void {
+  if (unloadArmed) {
+    return;
+  }
+  unloadArmed = true;
+  window.addEventListener("beforeunload", () => {
+    try {
+      void room?.disconnect();
+    } catch {
+      // Unloading anyway.
+    }
+    chain?.cleanup();
+  });
+}

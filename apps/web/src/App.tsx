@@ -14,6 +14,14 @@ import { UserPanel } from "./components/UserPanel.js";
 import { myAccess } from "./lib/membership.js";
 import { useSessionStore } from "./store/session.js";
 import { useUiStore } from "./store/ui.js";
+import {
+  armUnloadCleanup,
+  setPttActive,
+  setSelfMuted,
+  startAudioPlayback,
+} from "./voice/room.js";
+import { useVoiceConnection } from "./voice/store.js";
+import { useVoiceSettings } from "./voice/settings.js";
 
 function LoadingScreen(): React.JSX.Element {
   return (
@@ -37,6 +45,44 @@ function Shell(): React.JSX.Element {
   const setMobileMembers = useUiStore((state) => state.setMobileMembers);
 
   const serversQuery = useQuery({ queryKey: ["servers"], queryFn: fetchServers });
+
+  // Voice lifecycle: unload cleanup, mute shortcut, push-to-talk keys.
+  useEffect(() => {
+    armUnloadCleanup();
+    const isFormTarget = (target: EventTarget | null): boolean =>
+      target instanceof HTMLElement &&
+      (target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.tagName === "SELECT" ||
+        target.isContentEditable);
+    const down = (event: KeyboardEvent): void => {
+      if (isFormTarget(event.target) || event.isComposing) {
+        return;
+      }
+      const prefs = useVoiceSettings.getState();
+      if (prefs.pttEnabled && event.code === prefs.pttKey && !event.repeat) {
+        event.preventDefault();
+        setPttActive(true);
+        return;
+      }
+      if (event.code === "KeyM" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        const voice = useVoiceConnection.getState();
+        void setSelfMuted(!voice.selfMuted);
+      }
+    };
+    const up = (event: KeyboardEvent): void => {
+      const prefs = useVoiceSettings.getState();
+      if (prefs.pttEnabled && event.code === prefs.pttKey) {
+        setPttActive(false);
+      }
+    };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+    };
+  }, []);
 
   useEffect(() => {
     if (
@@ -84,6 +130,12 @@ function Shell(): React.JSX.Element {
   const access = state === null ? null : myAccess(state, user.id);
   const channel =
     state?.channels.find((entry) => entry.id === selectedChannelId) ?? null;
+  const voiceChannelId = useVoiceConnection((state) => state.channelId);
+  const needsAudioGesture = useVoiceConnection((state) => state.needsAudioGesture);
+  const voiceChannelName =
+    voiceChannelId === null
+      ? null
+      : (state?.channels.find((entry) => entry.id === voiceChannelId)?.name ?? "Voice");
 
   return (
     <div className="flex h-screen overflow-hidden [background-color:var(--surface-1)]">
@@ -119,11 +171,29 @@ function Shell(): React.JSX.Element {
         <>
           <div className="hidden h-full flex-col md:flex">
             <div className="flex min-h-0 flex-1">
-              <ChannelSidebar state={state} access={access} unread={unreadMap} />
+              <ChannelSidebar
+                state={state}
+                access={access}
+                unread={unreadMap}
+                myUserId={user.id}
+              />
             </div>
-            <UserPanel user={user} />
+            <UserPanel user={user} channelId={voiceChannelId} channelName={voiceChannelName} />
           </div>
           <div className="flex min-w-0 flex-1 flex-col">
+            {needsAudioGesture ? (
+              <div className="flex shrink-0 items-center justify-center gap-2 bg-amber-900/40 px-3 py-1.5 text-xs">
+                <span>Your browser blocked audio playback.</span>
+                <button
+                  type="button"
+                  onClick={() => void startAudioPlayback()}
+                  className="rounded px-2 py-0.5 text-white"
+                  style={{ backgroundColor: "var(--accent)" }}
+                >
+                  Click to enable audio
+                </button>
+              </div>
+            ) : null}
             <div className="flex items-center gap-1 px-2 pt-2 md:hidden">
               <button
                 type="button"
@@ -165,9 +235,14 @@ function Shell(): React.JSX.Element {
         <div className="fixed inset-0 z-30 flex md:hidden" role="dialog" aria-label="Channels">
           <div className="flex h-full flex-col">
             <div className="flex min-h-0 flex-1">
-              <ChannelSidebar state={state} access={access} unread={unreadMap} />
+              <ChannelSidebar
+                state={state}
+                access={access}
+                unread={unreadMap}
+                myUserId={user.id}
+              />
             </div>
-            <UserPanel user={user} />
+            <UserPanel user={user} channelId={voiceChannelId} channelName={voiceChannelName} />
           </div>
           <button
             type="button"

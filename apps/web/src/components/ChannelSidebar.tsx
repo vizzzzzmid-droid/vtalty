@@ -15,8 +15,10 @@ import { queryClient } from "../api/queryClient.js";
 import { deleteCategory, deleteChannel } from "../api/resources.js";
 import type { MyAccess } from "../lib/membership.js";
 import { useUiStore } from "../store/ui.js";
+import { joinVoiceChannel } from "../voice/room.js";
 import { CategoryDialog, ChannelDialog } from "./dialogs.js";
 import { ConfirmDialog, Tip } from "./ui.js";
+import { VoiceParticipants } from "./VoiceParticipants.js";
 
 type DialogState =
   | { kind: "channel-create"; categoryId: string | null }
@@ -46,6 +48,12 @@ function ChannelRow({
   const Icon = channel.type === "voice" ? Volume2 : Hash;
   const unread = badge?.unreadCount ?? 0;
   const mentions = badge?.mentionCount ?? 0;
+  const activate = (): void => {
+    selectChannel(channel.id);
+    if (channel.type === "voice") {
+      void joinVoiceChannel(channel.id);
+    }
+  };
   return (
     <div
       className={`group flex items-center gap-1 rounded px-2 py-1 ${
@@ -54,8 +62,9 @@ function ChannelRow({
     >
       <button
         type="button"
-        onClick={() => selectChannel(channel.id)}
+        onClick={activate}
         aria-current={selected ? "true" : undefined}
+        aria-label={`${channel.type === "voice" ? "Join voice channel" : "Open channel"} ${channel.name}`}
         className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
       >
         <Icon
@@ -122,10 +131,12 @@ export function ChannelSidebar({
   state,
   access,
   unread,
+  myUserId,
 }: {
   state: ServerState;
   access: MyAccess | null;
   unread: Record<string, { unreadCount: number; mentionCount: number }>;
+  myUserId: string;
 }): React.JSX.Element {
   const selectedChannelId = useUiStore((state) => state.selectedChannelId);
   const collapsedCategories = useUiStore((state) => state.collapsedCategories);
@@ -156,17 +167,31 @@ export function ChannelSidebar({
   const uncategorized = sortedChannels.filter((channel) => channel.categoryId === null);
   const sortedCategories = [...state.categories].sort((a, b) => a.position - b.position);
 
-  const renderChannel = (channel: Channel) => (
-    <ChannelRow
-      key={channel.id}
-      channel={channel}
-      selected={channel.id === selectedChannelId}
-      canManage={canManage}
-      badge={unread[channel.id]}
-      onEdit={() => setDialog({ kind: "channel-edit", channel })}
-      onDelete={() => setDialog({ kind: "delete-channel", channel })}
-    />
-  );
+  const renderChannel = (channel: Channel) => {
+    const voice = state.voice.find((entry) => entry.channelId === channel.id);
+    return (
+      <div key={channel.id}>
+        <ChannelRow
+          channel={channel}
+          selected={channel.id === selectedChannelId}
+          canManage={canManage}
+          badge={unread[channel.id]}
+          onEdit={() => setDialog({ kind: "channel-edit", channel })}
+          onDelete={() => setDialog({ kind: "delete-channel", channel })}
+        />
+        {channel.type === "voice" && voice !== undefined ? (
+          <VoiceParticipants
+            channelId={channel.id}
+            serverId={serverId}
+            participants={voice.participants}
+            members={state.members}
+            myUserId={myUserId}
+            canModerate={access?.canManageMembers === true}
+          />
+        ) : null}
+      </div>
+    );
+  };
 
   return (
     <div className="flex h-full w-60 shrink-0 flex-col [background-color:var(--surface-2)]">

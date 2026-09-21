@@ -12,6 +12,7 @@ import { useSessionStore } from "../store/session.js";
 import { useUiStore } from "../store/ui.js";
 import { ChannelsTab, InvitesTab, MembersTab } from "./AdminTabs.js";
 import { Field, inputClass } from "./ui.js";
+import { VoiceAudioTab } from "./VoiceAudioTab.js";
 
 function AccountTab({ user }: { user: User }): React.JSX.Element {
   const [displayName, setDisplayName] = useState(user.displayName);
@@ -141,6 +142,12 @@ export function SettingsModal({
               >
                 Account
               </Tabs.Trigger>
+              <Tabs.Trigger
+                value="voice"
+                className="rounded px-3 py-1.5 text-left text-sm data-[state=active]:[background-color:var(--surface-3)]"
+              >
+                Voice &amp; Audio
+              </Tabs.Trigger>
               {showChannels ? (
                 <Tabs.Trigger
                   value="channels"
@@ -169,6 +176,9 @@ export function SettingsModal({
             <div className="min-h-0 flex-1 overflow-y-auto p-5">
               <Tabs.Content value="account">
                 {user === null ? null : <AccountTab user={user} />}
+              </Tabs.Content>
+              <Tabs.Content value="voice">
+                <VoiceAudioTab />
               </Tabs.Content>
               {showChannels && state !== null ? (
                 <Tabs.Content value="channels">

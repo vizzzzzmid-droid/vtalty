@@ -1,6 +1,7 @@
 import {
   serverStateSchema,
   wsTicketResponseSchema,
+  voiceTokenResponseSchema,
   type AuthResponse,
   type Category,
   type Channel,
@@ -18,6 +19,7 @@ import {
   type ServerState,
   type UnreadEntry,
   type User,
+  type VoiceTokenResponse,
 } from "@vitality/shared";
 import { del, ensureFreshSession, get, getAccessToken, patch, post } from "./http.js";
 import { ApiError } from "./http.js";
@@ -49,6 +51,26 @@ export function fetchMe(): Promise<User> {
 export async function requestWsTicket(): Promise<string> {
   const data: unknown = await post<unknown>("/ws-ticket");
   return wsTicketResponseSchema.parse(data).ticket;
+}
+
+/** Mint a short-lived LiveKit join token for a voice channel. */
+export async function requestVoiceToken(channelId: string): Promise<VoiceTokenResponse> {
+  const data: unknown = await post<unknown>(`/channels/${channelId}/voice-token`);
+  return voiceTokenResponseSchema.parse(data);
+}
+
+/** Server-mute/unmute a participant (admins). */
+export function moderateVoiceMute(
+  channelId: string,
+  userId: string,
+  muted: boolean,
+): Promise<void> {
+  return post<void>(`/channels/${channelId}/voice/mute`, { userId, muted });
+}
+
+/** Force-disconnect a participant (admins). */
+export function moderateVoiceDisconnect(channelId: string, userId: string): Promise<void> {
+  return del(`/channels/${channelId}/voice/participants/${userId}`);
 }
 
 export function patchMe(patchBody: {

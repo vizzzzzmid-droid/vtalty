@@ -10,6 +10,7 @@ import {
 import { queryClient } from "../api/queryClient.js";
 import { requestWsTicket, type HistoryPage } from "../api/resources.js";
 import { usePresenceStore } from "../store/presence.js";
+import { useVoiceConnection } from "../voice/store.js";
 
 let socket: WebSocket | null = null;
 let lastSeq = 0;
@@ -185,6 +186,11 @@ async function openSocket(): Promise<void> {
     void queryClient.invalidateQueries({ queryKey: ["state"] });
     void queryClient.invalidateQueries({ queryKey: ["servers"] });
     void queryClient.invalidateQueries({ queryKey: ["unread"] });
+    // Re-announce mic state: flags changed during the outage never arrived.
+    const voice = useVoiceConnection.getState();
+    if (voice.status === "connected" && voice.channelId !== null) {
+      sendVoiceFlags(voice.channelId, voice.selfMuted, voice.selfDeafened);
+    }
   };
   next.onmessage = (msg) => {
     if (typeof msg.data === "string") {
@@ -245,4 +251,18 @@ export function sendTyping(channelId: string): void {
   }
   lastTypingSent.set(channelId, now);
   socket.send(JSON.stringify({ type: "typing.start", channelId }));
+}
+
+/** Announce mic/deafen flags (server accepts only for participants). */
+export function sendVoiceFlags(
+  channelId: string,
+  muted: boolean,
+  deafened: boolean,
+): void {
+  if (socket === null || socket.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  socket.send(
+    JSON.stringify({ type: "voice.state.update", channelId, muted, deafened }),
+  );
 }

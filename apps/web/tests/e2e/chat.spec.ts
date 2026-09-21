@@ -23,7 +23,7 @@ test("register -> create channel -> send -> edit -> delete -> upload image", asy
 
   // Seeded shell is visible.
   await expect(
-    page.getByRole("button", { name: "general", exact: true }),
+    page.getByRole("button", { name: "Open channel general" }),
   ).toBeVisible();
 
   // Create a text channel via Settings -> Channels.
@@ -35,7 +35,7 @@ test("register -> create channel -> send -> edit -> delete -> upload image", asy
   // The dialog closes on success; the sidebar updates via snapshot refetch.
 
   // Open the new channel and send a message.
-  await page.getByRole("button", { name: channelName, exact: true }).click();
+  await page.getByRole("button", { name: `Open channel ${channelName}` }).click();
   await page.getByLabel("Message text").fill("hello e2e");
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.getByText("hello e2e", { exact: true })).toBeVisible();
