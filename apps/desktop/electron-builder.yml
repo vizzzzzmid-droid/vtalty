@@ -1,5 +1,8 @@
 appId: shop.kirskiy.vitality
 productName: vitality
+# The workspace package name (@vitality/desktop) is not a safe executable
+# name (AppImage rejects the @); use a plain one on every platform.
+executableName: vitality-desktop
 copyright: Copyright © 2026 vitality contributors
 asarUnpack:
   # uiohook-napi ships a native .node binary: keep it unpacked so the OS
