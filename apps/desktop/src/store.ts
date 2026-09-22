@@ -2,6 +2,7 @@ import { app } from "electron";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
+import { DEFAULT_MUTE_ACCELERATOR } from "./keymap.js";
 
 /**
  * Persisted desktop settings (JSON in userData, zod-validated on load;
@@ -30,6 +31,9 @@ const settingsSchema = z.object({
   globalPttEnabled: z.boolean().default(false),
   globalPttKeycode: z.number().int().min(0).max(65535).default(41),
   globalMuteShortcut: z.boolean().default(true),
+  // Free-form here (validated on write + at register time); a corrupt old
+  // value must not brick the store load.
+  globalMuteAccelerator: z.string().max(64).default(DEFAULT_MUTE_ACCELERATOR),
 });
 
 export type DesktopSettings = z.infer<typeof settingsSchema>;
@@ -44,6 +48,7 @@ const DEFAULTS: DesktopSettings = {
   globalPttEnabled: false,
   globalPttKeycode: 41, // Backquote (`) in uiohook keycodes
   globalMuteShortcut: true,
+  globalMuteAccelerator: DEFAULT_MUTE_ACCELERATOR,
 };
 
 function filePath(): string {

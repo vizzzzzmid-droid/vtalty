@@ -59,6 +59,20 @@ is knowingly accepted.
 | V6 | Low | one-session eviction | If the force-drop `removeParticipant` fails (LiveKit down), the store says "left" while LiveKit still lists the user; reconcile re-adds them (membership-gated) until the client actually leaves. | Accepted degradation while LiveKit is down (voice is unusable then anyway). |
 | V7 | Info | `Caddyfile`, `apps/web` | LiveKit `access_token` travels as an `/rtc` query param (verified in livekit-client source) and would land in access logs. | Caddy `format filter` now replaces both `ticket` and `access_token`; voice-token responses (JSON bodies) are never logged by pino. |
 
+## Phase 6b desktop findings (adversarial review, steps 1–3)
+
+Attack surface: the window loads an operator-chosen instance origin
+remotely; a compromised/malicious server origin is in scope.
+
+| ID | Sev | Location | Finding | Resolution |
+|----|-----|----------|---------|------------|
+| D1 | High | `apps/desktop/src/ipc.ts` (`getRecentServers`, `getSetting`, `setSetting`) | Handlers were reachable from the connected instance origin, letting a malicious server enumerate the user's servers and read/flip desktop settings (e.g. silently enabling the global key hook). | Restricted to the local connect screen (`isConnectSender`); the web bridge never calls them. |
+| D2 | Med | `apps/desktop/src/main.ts` (`loadInstance`) | Loader re-parsed with only a protocol check: credentials/fragments/non-loopback-http could reach `loadURL` if a caller ever passed a raw URL. | Loader now goes through `normalizeServerUrl` (schema-validated, credentials/fragments stripped). |
+| D3 | Med | `apps/desktop/src/ptt.ts` | `uiohook-napi` is a system-wide key hook — every keystroke passes through the handlers. | Handlers compare only the bound keycode via `matchesPttKey` (unit-tested); nothing is logged, stored, or forwarded. Documented in code. |
+| D4 | Med | `apps/desktop/src/ptt.ts` (`registerMuteShortcut`) | A hand-edited `globalMuteAccelerator` could register a bare typing key globally (keystroke theft by annoyance/DoS of typing). | `validateAccelerator` requires ≥1 modifier and rejects OS-reserved combos, enforced on write AND at register time (fallback to default). |
+| D5 | Low | `apps/desktop/src/main.ts` (build) | Preload/renderer module-format mismatch silently killed the bridge once (ESM preload in sandbox, CJS renderer bundle). | `preload-error` listener logs failures to stderr; Playwright-Electron smoke (`tests/electron`) boots the real app in CI and asserts the bridge responds. |
+| D6 | Info | `apps/desktop/src/ipc.ts` (`notify`) | Notification title/body render in the OS; `channelId` is echoed back to the renderer. | zod lengths + `notificationClickSchema` re-validation on the way back; click only focuses + navigates, never executes. |
+
 ## Knowingly accepted (revisit if the threat model changes)
 
 - **A1** Username enumeration via `USERNAME_TAKEN` on register (low; standard).

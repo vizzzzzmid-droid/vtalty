@@ -115,6 +115,12 @@ assertions are manual-only.
 - [ ] Global PTT: enable in connect-screen settings, hold the key anywhere
       (even unfocused) → talk indicator; on Wayland / macOS-without-permission
       the UI explains the fallback (in-app PTT while focused).
+- [ ] PTT rebind: "Rebind…" → "Listening…" → press Caps Lock → label updates;
+      Esc cancels; trying Tab/Escape/a bare modifier is rejected with a
+      message. Key changes apply after app restart.
+- [ ] Toggle-mute shortcut: save `Ctrl+Alt+P` → works globally after restart;
+      `Alt+F4` and bare `F9` are rejected; a shortcut sharing the PTT key is
+      rejected as conflicting.
 - [ ] `Ctrl+Shift+M` toggles mute globally. Minimize hides to tray; tray
       "Show" restores; single instance (second launch focuses the first).
 - [ ] Mention while unfocused shows a native notification; clicking it focuses
@@ -125,3 +131,6 @@ assertions are manual-only.
       `vitality-desktop.json` falls back to defaults (no crash).
 - [ ] Self-signed `https://localhost` fails closed ("unreachable") until the
       Caddy root CA is trusted at OS level — the app never auto-accepts certs.
+- [ ] Packaging: install the CI NSIS `.exe` on Windows (unsigned →
+      SmartScreen prompt is expected) and the AppImage on Linux; the app
+      starts, PTT hook loads natively, no missing-`.node` errors in the log.

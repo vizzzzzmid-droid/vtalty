@@ -15,7 +15,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.tests.json",
     "lint": "eslint src tests",
     "test": "vitest run tests/unit",
-    "test:integration": "vitest run tests/integration"
+    "test:integration": "vitest run tests/integration --pool=forks --maxWorkers=1"
   },
   "dependencies": {
     "@fastify/cookie": "11.0.0",

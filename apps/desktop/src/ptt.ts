@@ -2,6 +2,7 @@ import { globalShortcut } from "electron";
 import type { BrowserWindow } from "electron";
 import { IPC_CHANNELS } from "./shared.js";
 import { loadSettings } from "./store.js";
+import { DEFAULT_MUTE_ACCELERATOR, matchesPttKey, validateAccelerator } from "./keymap.js";
 
 export interface PttCapabilities {
   available: boolean;
@@ -48,14 +49,17 @@ export async function startGlobalPtt(
     };
   }
   const wanted = settings.globalPttKeycode;
+  // Privacy: the hook sees EVERY keystroke system-wide; the handlers below
+  // compare only the bound keycode and never log, store, or forward anything
+  // else. No keylogging — by construction, and asserted in review.
   const down = (event: { keycode?: unknown }): void => {
-    if (typeof event.keycode === "number" && event.keycode === wanted) {
+    if (matchesPttKey(event.keycode, wanted)) {
       onState(true);
       window.webContents.send(IPC_CHANNELS.pttKey, { active: true });
     }
   };
   const up = (event: { keycode?: unknown }): void => {
-    if (typeof event.keycode === "number" && event.keycode === wanted) {
+    if (matchesPttKey(event.keycode, wanted)) {
       onState(false);
       window.webContents.send(IPC_CHANNELS.pttKey, { active: false });
     }
@@ -92,16 +96,23 @@ export function isGlobalPttActive(): boolean {
   return hookActive;
 }
 
-const MUTE_ACCELERATOR = "CommandOrControl+Shift+M";
-
-/** Global toggle-mute via Electron's own shortcut (press-only is fine here). */
+/**
+ * Global toggle-mute via Electron's own shortcut (press-only is fine here).
+ * The accelerator comes from settings; an invalid stored value falls back
+ * to the default (validated again here so a hand-edited config cannot
+ * register a bare typing key globally).
+ */
 export function registerMuteShortcut(window: BrowserWindow): boolean {
   const settings = loadSettings();
   if (!settings.globalMuteShortcut) {
     return false;
   }
+  const accelerator =
+    validateAccelerator(settings.globalMuteAccelerator) === null
+      ? settings.globalMuteAccelerator
+      : DEFAULT_MUTE_ACCELERATOR;
   try {
-    const ok = globalShortcut.register(MUTE_ACCELERATOR, () => {
+    const ok = globalShortcut.register(accelerator, () => {
       if (!window.isDestroyed()) {
         window.webContents.send(IPC_CHANNELS.toggleMute);
       }

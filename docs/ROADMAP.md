@@ -42,5 +42,3 @@ in the code. Items move out of this file only with explicit user approval.
   SmartScreen/Gatekeeper story) before wiring it.
 - macOS code signing + notarization; Linux `.deb` is built but only AppImage
   is published in CI (verify the deb install path before advertising it).
-- Configurable global-PTT key + toggle-mute accelerator (currently fixed
-  keycode 41 / `Ctrl+Shift+M`).

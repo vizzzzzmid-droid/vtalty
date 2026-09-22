@@ -21,11 +21,12 @@
 - Full plan: `docs/ARCHITECTURE.md` (read it first). Deferred items:
   `docs/ROADMAP.md`. Manual voice test checklist: `docs/MANUAL_TESTS.md`
   (from Phase 4).
-- Current phase: **Phase 6b step 2 — DONE (picker UI + tray polish +
-  mention notifications)**. Steps 1–2 committed; step 3 (PTT wiring in web
-  is done via onPttKey/onToggleMute; remaining: packaging proof, CI run,
-  full adversarial review) pending. STOP after reporting, wait for
-  "continue".
+- Current phase: **Phase 6b step 3 — IN PROGRESS (uncommitted)**. PTT
+  rebind + configurable mute shortcut, CJS/esbuild module fix, Electron
+  smoke test, adversarial review done locally; CI fixes pushed (digest,
+  X11 surprisingly needs xrandr too, shared build, compose env, migrate
+  secret, vite host flag, integration serial). Waiting on green CI +
+  artifact inspection. Then commit, report, STOP until "continue".
 - Repo root moved to `vitality/` (clean dir; parent `Default Project` holds
   unrelated files). All paths below are relative to `vitality/`.
 - Local toolchain (this Windows machine): Node 24.19 + pnpm 9.15.0 via

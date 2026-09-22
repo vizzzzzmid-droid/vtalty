@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'" />
 <title>vitality — Connect</title>
 <style>
   :root { color-scheme: dark; }
@@ -41,10 +42,21 @@
     <label><input type="checkbox" id="opt-start-min" /> Start minimized</label>
     <label><input type="checkbox" id="opt-notify" /> Mention notifications</label>
     <label><input type="checkbox" id="opt-ptt" /> Global push-to-talk (hold key anywhere)</label>
+    <div style="margin:4px 0 4px 24px;font-size:12px;">
+      <span>PTT key: <strong id="ptt-key-label">…</strong></span>
+      <button type="button" id="ptt-rebind" class="ghost" style="padding:4px 10px;margin-left:8px;">Rebind…</button>
+      <div id="ptt-hint" style="color:#949ba4;margin-top:2px;"></div>
+    </div>
+    <label>Mute shortcut <input type="text" id="opt-mute-acc" style="width:11rem;" autocomplete="off" spellcheck="false" /></label>
+    <div style="margin:2px 0 4px 24px;font-size:12px;">
+      <button type="button" id="mute-save" class="ghost" style="padding:4px 10px;">Save shortcut</button>
+      <div id="keys-error" role="alert" style="color:#f38ba8;margin-top:2px;"></div>
+      <div style="color:#949ba4;margin-top:2px;">Key changes apply after app restart.</div>
+    </div>
     <div id="caps" style="color:#949ba4;font-size:12px;"></div>
   </fieldset>
   <footer id="version"></footer>
 </main>
-<script src="./connect.js"></script>
+<script type="module" src="./connect.js"></script>
 </body>
 </html>

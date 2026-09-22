@@ -19,13 +19,9 @@ const extraArgs = process.argv.slice(2).filter((arg, index, all) => {
   return true;
 });
 
-const build = spawnSync("npx", ["tsc", "-p", "tsconfig.json"], { cwd: root, stdio: "inherit", shell: true });
+const build = spawnSync("node", ["scripts/build.mjs"], { cwd: root, stdio: "inherit", shell: true });
 if (build.status !== 0) {
   process.exit(build.status ?? 1);
-}
-const copy = spawnSync("node", ["scripts/copy-assets.mjs"], { cwd: root, stdio: "inherit", shell: true });
-if (copy.status !== 0) {
-  process.exit(copy.status ?? 1);
 }
 
 const electron = spawnSync("npx", ["electron", ".", ...extraArgs], {

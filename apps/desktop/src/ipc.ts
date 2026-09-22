@@ -16,6 +16,7 @@ import {
 import { resolveScreenPick } from "./picker.js";
 import { loadSettings, rememberServer, saveSettings, type DesktopSettings } from "./store.js";
 import { validateScreenPickResult } from "./picker.js";
+import { validateAccelerator } from "./keymap.js";
 
 export interface IpcContext {
   window: () => BrowserWindow | null;
@@ -70,6 +71,7 @@ export const WRITABLE_SETTINGS = [
   "notificationsEnabled",
   "globalPttEnabled",
   "globalPttKeycode",
+  "globalMuteAccelerator",
 ] as const;
 
 export type WritableSettingKey = (typeof WRITABLE_SETTINGS)[number];
@@ -120,6 +122,13 @@ export function applySettingsPatch(
     record["globalPttKeycode"] <= 65535
   ) {
     next.globalPttKeycode = record["globalPttKeycode"];
+    changed = true;
+  }
+  if (
+    typeof record["globalMuteAccelerator"] === "string" &&
+    validateAccelerator(record["globalMuteAccelerator"]) === null
+  ) {
+    next.globalMuteAccelerator = record["globalMuteAccelerator"].trim();
     changed = true;
   }
   return { next, changed };
@@ -222,12 +231,10 @@ export function registerIpc(context: IpcContext): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.getRecentServers, (event) => {
+    // Recent servers are shown only on the local connect screen; the
+    // connected instance has no business enumerating the user's servers.
     const url = resolveIpcSenderUrl(event);
-    if (url === undefined) {
-      return [];
-    }
-    const origin = context.instanceOrigin();
-    if (!isTrustedSender(url, origin) && !isConnectSender(url)) {
+    if (url === undefined || !isConnectSender(url)) {
       return [];
     }
     return loadSettings().recentServers;
@@ -328,7 +335,11 @@ export function registerIpc(context: IpcContext): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.getSetting, (event, body: unknown) => {
-    if (denied(event, context)) {
+    // Desktop settings (tray, PTT key, mute shortcut) are managed on the
+    // local connect screen only — the remote origin cannot read or flip
+    // them (e.g. silently enabling the global key hook).
+    const url = resolveIpcSenderUrl(event);
+    if (url === undefined || !isConnectSender(url)) {
       return null;
     }
     const key = typeof body === "object" && body !== null && "key" in body ? body.key : null;
@@ -336,7 +347,8 @@ export function registerIpc(context: IpcContext): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.setSetting, (event, body: unknown) => {
-    if (denied(event, context)) {
+    const url = resolveIpcSenderUrl(event);
+    if (url === undefined || !isConnectSender(url)) {
       return false;
     }
     const { next, changed } = applySettingsPatch(loadSettings(), body);

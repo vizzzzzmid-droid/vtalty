@@ -7,8 +7,7 @@ import {
   Tray,
 } from "electron";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { serverUrlSchema } from "./shared.js";
+import { serverUrlSchema, normalizeServerUrl } from "./shared.js";
 import { decideNavigation, decidePermission, frameBelongsToWindow } from "./security.js";
 import { listScreenSources, requestScreenPick, cancelScreenPicks } from "./picker.js";
 import {
@@ -20,7 +19,8 @@ import {
 import { loadSettings, saveSettings } from "./store.js";
 import { openExternalSafe, registerIpc } from "./ipc.js";
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+// Compiled CJS layout: __dirname is dist/, one level below the app root.
+const ROOT = path.resolve(__dirname, "..");
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -66,17 +66,15 @@ function loadInstance(url: string): Promise<void> {
   if (window === null || window.isDestroyed()) {
     return Promise.resolve();
   }
-  let normalized: URL;
-  try {
-    normalized = new URL(url);
-  } catch {
+  // Re-validate at the call site (defense in depth): callers pass
+  // already-validated URLs, but the loader never trusts them blindly —
+  // credentials, fragments, and non-loopback http are stripped/rejected.
+  const normalized = normalizeServerUrl(url);
+  if (normalized === null) {
     return Promise.resolve();
   }
-  if (normalized.protocol !== "http:" && normalized.protocol !== "https:") {
-    return Promise.resolve();
-  }
-  instanceOrigin = normalized.origin;
-  return window.loadURL(normalized.toString());
+  instanceOrigin = new URL(normalized).origin;
+  return window.loadURL(normalized);
 }
 
 function showConnectScreen(): void {
@@ -107,6 +105,12 @@ function createWindow(startMinimized: boolean): void {
   });
   mainWindow = window;
   applyWindowState(window);
+
+  // Preload failures are silent by default (no bridge, no message) — log
+  // them so a broken preload can never hide behind a working page.
+  window.webContents.on("preload-error", (_event, preloadPath, error) => {
+    console.error(`[desktop] preload failed: ${preloadPath}: ${String(error)}`);
+  });
 
   // --- Navigation lockdown ---
   window.webContents.on("will-navigate", (event, url) => {

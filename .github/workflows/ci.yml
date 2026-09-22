@@ -150,13 +150,15 @@ jobs:
             curl -sf http://127.0.0.1:3000/healthz && break
             sleep 2
           done
+          curl -sf http://127.0.0.1:3000/healthz
       - name: Start the web dev server
         run: |
-          pnpm --filter @vitality/web dev -- --port 5173 --host 127.0.0.1 > /tmp/vitality-web.log 2>&1 &
+          pnpm --filter @vitality/web exec vite --port 5173 --host 127.0.0.1 > /tmp/vitality-web.log 2>&1 &
           for i in $(seq 1 30); do
             curl -sf http://127.0.0.1:5173/ && break
             sleep 2
           done
+          curl -sf http://127.0.0.1:5173/ > /dev/null
       - run: pnpm --filter @vitality/web test:e2e
       - name: Upload traces and logs on failure
         if: failure()
@@ -244,13 +246,15 @@ jobs:
             curl -sf http://127.0.0.1:3000/healthz && break
             sleep 2
           done
+          curl -sf http://127.0.0.1:3000/healthz
       - name: Start the web dev server
         run: |
-          pnpm --filter @vitality/web dev -- --port 5173 --host 127.0.0.1 > /tmp/vitality-web.log 2>&1 &
+          pnpm --filter @vitality/web exec vite --port 5173 --host 127.0.0.1 > /tmp/vitality-web.log 2>&1 &
           for i in $(seq 1 30); do
             curl -sf http://127.0.0.1:5173/ && break
             sleep 2
           done
+          curl -sf http://127.0.0.1:5173/ > /dev/null
       - run: pnpm --filter @vitality/web test:e2e-voice
       - name: Upload traces and logs on failure
         if: failure()

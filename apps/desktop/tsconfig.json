@@ -7,8 +7,12 @@
     "sourceMap": true,
     "types": ["node"],
     "lib": ["ES2022", "DOM"],
-    "module": "node16",
-    "moduleResolution": "node16",
+    "module": "commonjs",
+    "moduleResolution": "node",
   },
-  "include": ["src"]
+  "include": ["src"],
+  // The connect-page renderer is a browser ESM bundle built separately
+  // (tsconfig.renderer.json); compiling it here would emit CJS that the
+  // <script> tag cannot execute.
+  "exclude": ["src/renderer"]
 }

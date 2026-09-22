@@ -23,6 +23,7 @@ describe("isWritableSettingKey", () => {
       "notificationsEnabled",
       "globalPttEnabled",
       "globalPttKeycode",
+      "globalMuteAccelerator",
     ]) {
       expect(isWritableSettingKey(key)).toBe(true);
     }
@@ -64,6 +65,16 @@ describe("applySettingsPatch", () => {
     expect(applySettingsPatch(base, { globalPttKeycode: 65536 }).changed).toBe(false);
     expect(applySettingsPatch(base, { globalPttKeycode: 1.5 }).changed).toBe(false);
     expect(applySettingsPatch(base, { globalPttKeycode: "30" }).changed).toBe(false);
+  });
+
+  it("validates the mute accelerator", () => {
+    const { next, changed } = applySettingsPatch(base, {
+      globalMuteAccelerator: "Ctrl+Alt+P",
+    });
+    expect(changed).toBe(true);
+    expect(next.globalMuteAccelerator).toBe("Ctrl+Alt+P");
+    expect(applySettingsPatch(base, { globalMuteAccelerator: "F9" }).changed).toBe(false);
+    expect(applySettingsPatch(base, { globalMuteAccelerator: "Alt+F4" }).changed).toBe(false);
   });
 
   it("ignores wrong types and unknown fields", () => {

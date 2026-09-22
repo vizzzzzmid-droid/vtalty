@@ -22,6 +22,5 @@ const defaults =
   process.platform === "win32" ? ["--win", "nsis"] : process.platform === "darwin" ? ["--dir"] : ["--linux", "AppImage"];
 
 rmSync(path.join(root, "dist"), { recursive: true, force: true });
-run("npx", ["tsc", "-p", "tsconfig.json"]);
-run("node", ["scripts/copy-assets.mjs"]);
+run("node", ["scripts/build.mjs"]);
 run("npx", ["electron-builder", ...(hasTarget ? forwarded : [...defaults, ...forwarded])]);

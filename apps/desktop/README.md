@@ -35,9 +35,23 @@ URL **remotely** (same-origin web client) after a `/api/v1/health` check.
   files fall back to defaults): minimize-to-tray, start minimized, mention
   notifications, window bounds/maximized, recent servers (8), global PTT
   flag + keycode.
+- Global PTT key is rebindable on the connect screen ("Rebind…" capture
+  mode; typing keys and bare modifiers rejected). The toggle-mute
+  accelerator is editable too (modifier required, OS-reserved combos
+  rejected, conflict-checked against the PTT key). Key changes apply after
+  restart.
+- Platform limits: global PTT needs `uiohook-napi` — no hook on
+  Wayland-without-permission, macOS-without-Input-Monitoring approval, or
+  missing prebuilds (in-app tab-focused PTT remains the fallback);
+  system-audio loopback is Windows-only; tray icons/badges vary by OS.
+- Download: CI `desktop` workflow builds the NSIS installer (Windows) and
+  AppImage (Linux) on every `main` push; tagged `v*` releases attach them
+  via the `release` job. Builds are unsigned (SmartScreen/Gatekeeper
+  prompts expected) — see ROADMAP for the signing decision.
 
 ```bash
 pnpm --filter @vitality/desktop lint / typecheck / test
+pnpm --filter @vitality/desktop test:electron   # boots the real app (needs a display; xvfb in CI)
 VITALITY_SERVER_URL=https://localhost pnpm --filter @vitality/desktop dev
 pnpm --filter @vitality/desktop dist   # one command, no Docker/bash
 ```

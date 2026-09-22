@@ -2,24 +2,27 @@
   "name": "@vitality/desktop",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
+  "type": "commonjs",
   "main": "dist/main.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
+    "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.tests.json",
     "lint": "eslint src tests",
     "test": "vitest run",
     "dev": "node scripts/dev.mjs",
     "dist": "node scripts/dist.mjs",
-    "pack": "electron-builder --dir"
+    "pack": "electron-builder --dir",
+    "test:electron": "playwright test --config playwright.config.ts"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@types/node": "^22.0.0",
     "electron": "44.4.3",
     "electron-builder": "26.15.3",
+    "esbuild": "0.25.0",
+    "eslint": "^10.0.0",
     "typescript": "^5.9.0",
     "typescript-eslint": "^8.0.0",
-    "eslint": "^10.0.0",
     "vitest": "^5.0.0"
   },
   "dependencies": {
