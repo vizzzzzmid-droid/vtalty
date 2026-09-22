@@ -21,12 +21,12 @@
 - Full plan: `docs/ARCHITECTURE.md` (read it first). Deferred items:
   `docs/ROADMAP.md`. Manual voice test checklist: `docs/MANUAL_TESTS.md`
   (from Phase 4).
-- Current phase: **Phase 6b step 3 — IN PROGRESS (uncommitted)**. PTT
-  rebind + configurable mute shortcut, CJS/esbuild module fix, Electron
-  smoke test, adversarial review done locally; CI fixes pushed (digest,
-  X11 surprisingly needs xrandr too, shared build, compose env, migrate
-  secret, vite host flag, integration serial). Waiting on green CI +
-  artifact inspection. Then commit, report, STOP until "continue".
+- Current phase: **Phase 6b — DONE (all 3 steps committed)**. Desktop
+  workflow green on main (NSIS + AppImage, Electron smoke in CI, installer
+  contents inspected). `ci` workflow still red on pre-existing server/web
+  failures (integration data assertions, e2e app asserts, smoke LiveKit
+  502) — documented below, out of desktop scope, not reproducible on this
+  box (no Docker/PG). STOP after reporting, wait for "continue".
 - Repo root moved to `vitality/` (clean dir; parent `Default Project` holds
   unrelated files). All paths below are relative to `vitality/`.
 - Local toolchain (this Windows machine): Node 24.19 + pnpm 9.15.0 via
@@ -246,16 +246,18 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   clean, 76 unit + 7 script tests green, `pnpm build`, YAML/Caddyfile
   checks, init+doctor executed, contrast computed. Docker/CI-only jobs
   (integration, e2e, smoke) still need CI/VPS.
-- [ ] Phase 6b — Electron desktop app (steps 1–2 done, committed: skeleton,
-  connect screen, security shell, web picker UI via `window.desktop`,
-  tray/single-instance/minimize-to-tray/start-minimized, mention
-  notifications with click-to-channel, `notificationsEnabled` setting,
-  39 desktop + 32 web unit tests, desktop.yml CI, README Download section,
-  MANUAL_TESTS desktop rows, ROADMAP Desktop section;
-  verified locally: desktop+web lint/typecheck/tests green, `tsc` builds +
-  asset copy green. NOT verified locally: Electron runtime launch (GUI),
-  `dist` packaging, CI run — need CI/VPS. Step 3 pending: packaging proof,
-  full adversarial review with fixes+tests).
+- [x] Phase 6b — Electron desktop app. Skeleton, connect screen, security
+  shell, web picker UI, tray/single-instance, mention notifications with
+  click-to-channel, PTT rebind + configurable mute shortcut, CJS/esbuild
+  module layout, Playwright-Electron smoke (5 tests, green locally AND in
+  CI under xvfb), adversarial review D1–D6 fixed, 51 desktop + 32 web unit
+  tests. Desktop CI green: NSIS + AppImage built, installer inspected
+  (asar contents + unpacked win32 .node confirmed). Docs: desktop README,
+  MANUAL_TESTS desktop rows, SECURITY_NOTES desktop section, ROADMAP
+  pruned. CI repairs along the way (caddy digest, X11/xorg-dev, shared
+  build, compose env, migrate secret, vite host, executableName, AppImage
+  metadata, dist.mjs `--` strip, uploads chown). Residual red in `ci`
+  workflow is pre-existing server/web breakage (see §8).
 
 ## 8. Known issues / risks
 
@@ -291,3 +293,11 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   specs) and compose smoke run in CI; real two-device audio/video is
   covered by `docs/MANUAL_TESTS.md`. The CI `e2e-voice` job is
   `continue-on-error` (experimental) until it proves green.
+- `ci` workflow red on main as of Phase 6b close (pre-existing, NOT from
+  desktop changes — server/web code untouched by 6b): server integration
+  (22 data-assertion failures, e.g. pagination windows shifted — looks
+  like app logic, not flakes; single-fork serialization already applied),
+  web e2e (axe violations + missing elements in chat flow), stack-smoke
+  (HTTP 502 on Caddy `/livekit/rtc` probe). None reproducible here
+  (no Docker/Postgres). Fix in server/web scope with CI iteration, not
+  from this box.
