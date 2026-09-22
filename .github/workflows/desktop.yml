@@ -35,6 +35,11 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # uiohook-napi rebuilds libuiohook from source via @electron/rebuild:
+      # X11/Xtst headers are required on Linux (Wayland still uses XKB/X11
+      # libs for the hook build).
+      - if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxtst-dev libxkbcommon-dev
       - run: pnpm --filter @vitality/desktop lint
       - run: pnpm --filter @vitality/desktop typecheck
       - run: pnpm --filter @vitality/desktop test
