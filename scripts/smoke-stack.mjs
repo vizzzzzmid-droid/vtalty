@@ -156,12 +156,14 @@ async function main() {
       return;
     }
     console.log("[cleanup] docker compose down -v");
-    compose("down", "-v");
+    // Bound the stop grace period: a stuck container must not hang the
+    // step until the CI timeout (observed once: down hung 23 minutes).
+    compose("down", "-v", "--timeout", "30");
   };
 
   try {
     await step("fresh stack up", async () => {
-      let out = compose("down", "-v");
+      let out = compose("down", "-v", "--timeout", "30");
       if (out.status !== 0) {
         throw new Error(`down failed: ${out.stderr.slice(0, 300)}`);
       }
@@ -535,6 +537,9 @@ async function main() {
     }
     teardown();
   }
+  // Explicit exit: native handles (@livekit/rtc-node, ws) must not keep
+  // the step alive after a green run.
+  process.exit(process.exitCode ?? 0);
 }
 
 const invokedDirectly =
