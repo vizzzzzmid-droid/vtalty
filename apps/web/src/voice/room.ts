@@ -14,6 +14,12 @@ import { requestVoiceToken } from "../api/resources.js";
 import { sendVoiceFlags } from "../ws/socket.js";
 import { buildMicChain, type MicChain } from "./chain.js";
 import { EnhancedUnavailableError } from "./rnnoise.js";
+import {
+  attachRemoteAudio,
+  clearRemoteAudio,
+  detachRemoteAudio,
+  detachRemoteAudioFor,
+} from "./remoteAudio.js";
 import type { VoiceQuality } from "./store.js";
 import { useVoiceConnection } from "./store.js";
 import { useVoiceSettings } from "./settings.js";
@@ -190,7 +196,8 @@ function attachHandlers(next: Room, LK: LiveKitModule): void {
       voiceSounds.join();
     }
   });
-  on(next, LK.RoomEvent.ParticipantDisconnected, () => {
+  on(next, LK.RoomEvent.ParticipantDisconnected, (participant: Participant) => {
+    detachRemoteAudioFor(participant.identity);
     if (snapshot().status === "connected") {
       voiceSounds.leave();
     }
@@ -210,12 +217,50 @@ function attachHandlers(next: Room, LK: LiveKitModule): void {
       // Screen tracks are opt-in: anything not actively watched is
       // unsubscribed immediately (saves VPS/client bandwidth).
       if ((isScreenVideo || isScreenAudio) && !watching) {
+        // TEMP-DEBUG(audio): remove after production audio investigation
+        console.log("[audio-debug] screen-optout early-return", {
+          identity: participant.identity,
+          kind: track.kind,
+          source: publication.source,
+          isScreenVideo,
+          isScreenAudio,
+          watching,
+        });
+
         publication.setSubscribed(false);
         return;
       }
       if (track.kind === LK.Track.Kind.Audio && snapshot().selfDeafened) {
+        // TEMP-DEBUG(audio): remove after production audio investigation
+        console.log("[audio-debug] deafen early-return", {
+          identity: participant.identity,
+          selfDeafened: snapshot().selfDeafened,
+        });
+
         publication.setSubscribed(false);
         return;
+      }
+      // Microphone audio must reach a real <audio> element in the DOM or
+      // nothing is audible (and per-user volume has nothing to act on).
+      // Screen-share audio is tile-owned (StreamTile attaches on watch).
+      // TEMP-DEBUG(audio): remove after production audio investigation
+      console.log("[audio-debug]", {
+        identity: participant.identity,
+        kind: track.kind,
+        source: publication.source,
+        expectedSource: LK.Track.Source.Microphone,
+        sourceMatch: publication.source === LK.Track.Source.Microphone,
+        isScreenVideo,
+        isScreenAudio,
+        watching,
+        selfDeafened: snapshot().selfDeafened,
+      });
+
+      if (
+        track.kind === LK.Track.Kind.Audio &&
+        publication.source === LK.Track.Source.Microphone
+      ) {
+        attachRemoteAudio(track, participant.identity);
       }
       const volume = useVoiceSettings.getState().userVolumes[participant.identity];
       if (volume !== undefined && !isScreenAudio) {
@@ -226,6 +271,19 @@ function attachHandlers(next: Room, LK: LiveKitModule): void {
   on(next, LK.RoomEvent.AudioPlaybackStatusChanged, (playing: boolean) => {
     snapshot().set({ needsAudioGesture: !playing });
   });
+  on(
+    next,
+    LK.RoomEvent.TrackUnsubscribed,
+    (track: Track) => {
+      // TEMP-DEBUG(audio): remove after production audio investigation
+      console.log("[audio-debug] TrackUnsubscribed -> detachRemoteAudio", {
+        kind: track.kind,
+        attachedElements: track.attachedElements.length,
+      });
+
+      detachRemoteAudio(track);
+    },
+  );
   on(
     next,
     LK.RoomEvent.TrackMuted,
@@ -313,6 +371,7 @@ function describeJoinError(err: unknown): string {
 async function teardownRoom(): Promise<void> {
   intentionalDisconnect = true;
   stopQualityTimer();
+  clearRemoteAudio();
   const current = room;
   room = null;
   micPublication = null;
