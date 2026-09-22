@@ -2,6 +2,9 @@
   "name": "@vitality/desktop",
   "version": "0.1.0",
   "private": true,
+  "description": "Self-hosted voice and text for friends (Electron wrapper)",
+  "author": "vitality contributors",
+  "homepage": "https://github.com/vizzzzzmid-droid/vtalty",
   "type": "commonjs",
   "main": "dist/main.js",
   "scripts": {
