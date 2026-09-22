@@ -22,6 +22,11 @@ RUN pnpm install --prod --frozen-lockfile
 COPY --from=build /repo/packages/shared/dist packages/shared/dist
 COPY --from=build /repo/apps/server/dist apps/server/dist
 COPY apps/server/migrations apps/server/migrations
+# The server runs as non-root (USER node) but the uploads named volume is
+# created root-owned: pre-create the dir with node ownership so Docker
+# propagates it into fresh volumes (existing pre-fix volumes need a manual
+# `chown 1000:1000` once).
+RUN mkdir -p /data/uploads && chown node:node /data/uploads
 WORKDIR /app/apps/server
 USER node
 EXPOSE 3000
