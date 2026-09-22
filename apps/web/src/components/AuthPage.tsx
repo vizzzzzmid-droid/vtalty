@@ -89,66 +89,104 @@ export function AuthPage(): React.JSX.Element {
               Register
             </Tabs.Trigger>
           </Tabs.List>
-          <form onSubmit={(event) => void submit(event)} className="mt-4 flex flex-col gap-3">
-            <Field label="Username">
-              <input
-                aria-label="Username"
-                autoComplete="username"
-                className={inputClass}
-                value={username}
-                maxLength={32}
-                onChange={(event) => setUsername(event.target.value)}
-              />
-            </Field>
-            <Field label="Password">
-              <input
-                aria-label="Password"
-                type="password"
-                autoComplete={tab === "login" ? "current-password" : "new-password"}
-                className={inputClass}
-                value={password}
-                maxLength={128}
-                onChange={(event) => setPassword(event.target.value)}
-              />
-            </Field>
-            {tab === "register" ? (
-              <>
-                <Field label="Display name (optional)">
-                  <input
-                    aria-label="Display name"
-                    autoComplete="nickname"
-                    className={inputClass}
-                    value={displayName}
-                    maxLength={64}
-                    onChange={(event) => setDisplayName(event.target.value)}
-                  />
-                </Field>
-                <Field label="Invite code (required unless you are first)">
-                  <input
-                    aria-label="Invite code"
-                    className={inputClass}
-                    value={inviteCode}
-                    maxLength={64}
-                    onChange={(event) => setInviteCode(event.target.value)}
-                    placeholder="Ask the server owner for one"
-                  />
-                </Field>
-              </>
-            ) : null}
-            {error === null ? null : (
-              <p role="alert" className="text-sm text-red-400">
-                {error}
-              </p>
-            )}
-            <button
-              type="submit"
-              disabled={pending}
-              className="rounded px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
-              style={{ backgroundColor: "var(--accent-strong)" }}
-            >
-              {pending ? "Please wait…" : tab === "login" ? "Log in" : "Register"}
-            </button>
-          </form>
+          {/* Tab panels (Radix wires trigger aria-controls to these ids;
+              without them axe flags dangling references). */}
+          <Tabs.Content value="login">
+            <form onSubmit={(event) => void submit(event)} className="mt-4 flex flex-col gap-3">
+              <Field label="Username">
+                <input
+                  aria-label="Username"
+                  autoComplete="username"
+                  className={inputClass}
+                  value={username}
+                  maxLength={32}
+                  onChange={(event) => setUsername(event.target.value)}
+                />
+              </Field>
+              <Field label="Password">
+                <input
+                  aria-label="Password"
+                  type="password"
+                  autoComplete="current-password"
+                  className={inputClass}
+                  value={password}
+                  maxLength={128}
+                  onChange={(event) => setPassword(event.target.value)}
+                />
+              </Field>
+              {tab === "login" && error !== null ? (
+                <p role="alert" className="text-sm text-red-400">
+                  {error}
+                </p>
+              ) : null}
+              <button
+                type="submit"
+                disabled={pending}
+                className="rounded px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+                style={{ backgroundColor: "var(--accent-strong)" }}
+              >
+                {pending ? "Please wait…" : "Log in"}
+              </button>
+            </form>
+          </Tabs.Content>
+          <Tabs.Content value="register">
+            <form onSubmit={(event) => void submit(event)} className="mt-4 flex flex-col gap-3">
+              <Field label="Username">
+                <input
+                  aria-label="Username"
+                  autoComplete="username"
+                  className={inputClass}
+                  value={username}
+                  maxLength={32}
+                  onChange={(event) => setUsername(event.target.value)}
+                />
+              </Field>
+              <Field label="Password">
+                <input
+                  aria-label="Password"
+                  type="password"
+                  autoComplete="new-password"
+                  className={inputClass}
+                  value={password}
+                  maxLength={128}
+                  onChange={(event) => setPassword(event.target.value)}
+                />
+              </Field>
+              <Field label="Display name (optional)">
+                <input
+                  aria-label="Display name"
+                  autoComplete="nickname"
+                  className={inputClass}
+                  value={displayName}
+                  maxLength={64}
+                  onChange={(event) => setDisplayName(event.target.value)}
+                />
+              </Field>
+              <Field label="Invite code (required unless you are first)">
+                <input
+                  aria-label="Invite code"
+                  className={inputClass}
+                  value={inviteCode}
+                  maxLength={64}
+                  onChange={(event) => setInviteCode(event.target.value)}
+                  placeholder="Ask the server owner for one"
+                />
+              </Field>
+              {tab === "register" && error !== null ? (
+                <p role="alert" className="text-sm text-red-400">
+                  {error}
+                </p>
+              ) : null}
+              <button
+                type="submit"
+                disabled={pending}
+                className="rounded px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+                style={{ backgroundColor: "var(--accent-strong)" }}
+              >
+                {pending ? "Please wait…" : "Register"}
+              </button>
+            </form>
+          </Tabs.Content>
         </Tabs.Root>
       </div>
     </main>

@@ -153,7 +153,17 @@ export async function serveAttachment(
     if (channel === undefined) {
       throw notFound("Attachment not found");
     }
-    await requireMembership(db, userId, channel.serverId);
+    // Mask membership as 404 (same rule as getServerState): outsiders must
+    // not learn whether the attachment exists. Only the 403 is masked —
+    // real outages still surface as 5xx.
+    try {
+      await requireMembership(db, userId, channel.serverId);
+    } catch (err) {
+      if (err instanceof HttpError && err.statusCode === 403) {
+        throw notFound("Attachment not found");
+      }
+      throw err;
+    }
   }
   let data: Buffer;
   try {

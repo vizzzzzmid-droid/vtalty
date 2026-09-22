@@ -46,7 +46,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AppDeps): void {
 
   app.post(
     "/api/v1/auth/register",
-    { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
+    { config: { rateLimit: { max: env.RATE_LIMIT_REGISTER_MAX, timeWindow: "1 minute" } } },
     async (request, reply) => {
       const input = parseBody(registerBodySchema, request.body);
       const result = await register(db, env, input);
@@ -63,7 +63,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AppDeps): void {
 
   app.post(
     "/api/v1/auth/login",
-    { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
+    { config: { rateLimit: { max: env.RATE_LIMIT_LOGIN_MAX, timeWindow: "1 minute" } } },
     async (request, reply) => {
       const input = parseBody(loginBodySchema, request.body);
       const result = await login(db, env, input);
@@ -79,7 +79,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AppDeps): void {
 
   app.post(
     "/api/v1/auth/refresh",
-    { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } },
+    { config: { rateLimit: { max: env.RATE_LIMIT_REFRESH_MAX, timeWindow: "1 minute" } } },
     async (request, reply) => {
       const raw = request.cookies[REFRESH_COOKIE];
       if (typeof raw !== "string" || raw.length === 0) {

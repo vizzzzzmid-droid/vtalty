@@ -300,6 +300,9 @@ export async function getServerState(
       members: memberList,
       categories,
       channels: channelList,
+      // Empty rooms are omitted from the snapshot (absence means "nobody
+      // here"). Per-room `voice.state` WS events still carry empty
+      // participant lists so clients can clear tiles.
       voice: channelRows
         .filter((row) => row.type === "voice")
         .map((row) => ({
@@ -311,7 +314,8 @@ export async function getServerState(
             sharingScreen: seat.sharingScreen,
             serverMuted: seat.serverMuted,
           })),
-        })),
+        }))
+        .filter((entry) => entry.participants.length > 0),
       readStates: readRows.map((row) => ({
         channelId: row.channelId,
         lastReadMessageId: row.lastReadMessageId,

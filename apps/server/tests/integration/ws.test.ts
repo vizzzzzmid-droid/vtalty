@@ -18,16 +18,33 @@ interface WsEvent {
   data: Record<string, unknown>;
 }
 
-function nextEvent(socket: WebSocket, timeoutMs = 5000): Promise<WsEvent> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      socket.off("message", onMessage);
-      reject(new Error("timed out waiting for WS event"));
-    }, timeoutMs);
-    const onMessage = (data: WebSocket.RawData) => {
+interface WsEvent {
+  type: string;
+  data: Record<string, unknown>;
+}
+
+// Per-socket mailbox: ONE persistent listener per socket. Frames sent
+// back-to-back (e.g. presence.update + server.ready on connect) can be
+// emitted synchronously in a single tick — detaching between waits would
+// drop any frame emitted in the detach/re-attach gap, so the listener is
+// attached once and waiters consume from the queue.
+interface Mailbox {
+  events: WsEvent[];
+  waiters: Array<() => void>;
+}
+
+const mailboxes = new Map<WebSocket, Mailbox>();
+
+function mailbox(socket: WebSocket): Mailbox {
+  let box = mailboxes.get(socket);
+  if (box === undefined) {
+    box = { events: [], waiters: [] };
+    mailboxes.set(socket, box);
+    const current: Mailbox = box;
+    socket.on("message", (data: WebSocket.RawData) => {
       let parsedJson: unknown;
       try {
-        parsedJson = JSON.parse(data.toString()) as unknown;
+        parsedJson = JSON.parse(String(data)) as unknown;
       } catch {
         return;
       }
@@ -35,14 +52,43 @@ function nextEvent(socket: WebSocket, timeoutMs = 5000): Promise<WsEvent> {
       if (!parsed.success) {
         return;
       }
-      clearTimeout(timer);
-      socket.off("message", onMessage);
-      resolve({
+      current.events.push({
         type: parsed.data.type,
         data: parsed.data.data as Record<string, unknown>,
       });
+      current.waiters.shift()?.();
+    });
+    socket.on("close", () => {
+      mailboxes.delete(socket);
+    });
+  }
+  return box;
+}
+
+function nextEvent(socket: WebSocket, timeoutMs = 5000): Promise<WsEvent> {
+  const box = mailbox(socket);
+  const ready = box.events.shift();
+  if (ready !== undefined) {
+    return Promise.resolve(ready);
+  }
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const index = box.waiters.indexOf(notify);
+      if (index >= 0) {
+        box.waiters.splice(index, 1);
+      }
+      reject(new Error("timed out waiting for WS event"));
+    }, timeoutMs);
+    const notify = (): void => {
+      clearTimeout(timer);
+      const event = box.events.shift();
+      if (event !== undefined) {
+        resolve(event);
+      } else {
+        box.waiters.push(notify);
+      }
     };
-    socket.on("message", onMessage);
+    box.waiters.push(notify);
   });
 }
 
@@ -235,36 +281,42 @@ describeIf("websocket gateway", () => {
       state.channels.find((entry) => entry.name === "general")?.id ?? "";
 
     const sender = await connectWithTicket(ctx, await mintTicket(ctx, owner));
-    const watcher = await connectWithTicket(ctx, await mintTicket(ctx, owner));
     try {
+      // Attach (via waitFor) BEFORE connecting the second socket: frames
+      // sent during the handshake are dropped when no listener is
+      // attached yet, so each socket must be drained before moving on.
       await waitFor(sender, (event) => event.type === "server.ready");
-      await waitFor(watcher, (event) => event.type === "server.ready");
+      const watcher = await connectWithTicket(ctx, await mintTicket(ctx, owner));
+      try {
+        await waitFor(watcher, (event) => event.type === "server.ready");
 
-      const seen: WsEvent[] = [];
-      watcher.on("message", (data: WebSocket.RawData) => {
-        try {
-          const parsed = wsServerEventSchema.safeParse(
-            JSON.parse(data.toString()) as unknown,
-          );
-          if (parsed.success && parsed.data.type === "typing.start") {
-            seen.push({
-              type: parsed.data.type,
-              data: parsed.data.data as Record<string, unknown>,
-            });
+        const seen: WsEvent[] = [];
+        watcher.on("message", (data: WebSocket.RawData) => {
+          try {
+            const parsed = wsServerEventSchema.safeParse(
+              JSON.parse(data.toString()) as unknown,
+            );
+            if (parsed.success && parsed.data.type === "typing.start") {
+              seen.push({
+                type: parsed.data.type,
+                data: parsed.data.data as Record<string, unknown>,
+              });
+            }
+          } catch {
+            // Ignore malformed frames in the collector.
           }
-        } catch {
-          // Ignore malformed frames in the collector.
-        }
-      });
-      sender.send(JSON.stringify({ type: "typing.start", channelId: generalId }));
-      sender.send(JSON.stringify({ type: "typing.start", channelId: generalId }));
-      sender.send(JSON.stringify({ type: "typing.start", channelId: generalId }));
-      await new Promise((resolve) => setTimeout(resolve, 1200));
-      expect(seen).toHaveLength(1);
-      expect(seen[0]?.data).toMatchObject({ channelId: generalId });
+        });
+        sender.send(JSON.stringify({ type: "typing.start", channelId: generalId }));
+        sender.send(JSON.stringify({ type: "typing.start", channelId: generalId }));
+        sender.send(JSON.stringify({ type: "typing.start", channelId: generalId }));
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+        expect(seen).toHaveLength(1);
+        expect(seen[0]?.data).toMatchObject({ channelId: generalId });
+      } finally {
+        watcher.close();
+      }
     } finally {
       sender.close();
-      watcher.close();
     }
   });
 

@@ -40,4 +40,25 @@ describe("loadEnv", () => {
     expect(env.REGISTRATION_MODE).toBe("open");
     expect(env.PORT).toBe(4000);
   });
+
+  it("defaults auth rate limits and accepts overrides", () => {
+    const defaults = loadEnv(baseEnv());
+    expect(defaults.RATE_LIMIT_REGISTER_MAX).toBe(10);
+    expect(defaults.RATE_LIMIT_LOGIN_MAX).toBe(10);
+    expect(defaults.RATE_LIMIT_REFRESH_MAX).toBe(30);
+    const raised = loadEnv({
+      ...baseEnv(),
+      RATE_LIMIT_REGISTER_MAX: "1000",
+      RATE_LIMIT_LOGIN_MAX: "500",
+      RATE_LIMIT_REFRESH_MAX: "600",
+    });
+    expect(raised.RATE_LIMIT_REGISTER_MAX).toBe(1000);
+    expect(raised.RATE_LIMIT_LOGIN_MAX).toBe(500);
+    expect(raised.RATE_LIMIT_REFRESH_MAX).toBe(600);
+  });
+
+  it("rejects non-positive rate limits", () => {
+    expect(() => loadEnv({ ...baseEnv(), RATE_LIMIT_REGISTER_MAX: "0" })).toThrow();
+    expect(() => loadEnv({ ...baseEnv(), RATE_LIMIT_LOGIN_MAX: "-5" })).toThrow();
+  });
 });

@@ -32,7 +32,9 @@ test("register -> create channel -> send -> edit -> delete -> upload image", asy
   await page.getByRole("button", { name: "New channel" }).click();
   await page.getByLabel("Channel name").fill(channelName);
   await page.getByRole("button", { name: "Create", exact: true }).click();
-  // The dialog closes on success; the sidebar updates via snapshot refetch.
+  // The create dialog closes on success; close Settings to return to the
+  // shell (the modal keeps the background sidebar inert while open).
+  await page.getByRole("button", { name: "Close settings" }).click();
 
   // Open the new channel and send a message.
   await page.getByRole("button", { name: `Open channel ${channelName}` }).click();

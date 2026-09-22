@@ -147,6 +147,35 @@ describeIf("messages", () => {
       "three",
       "four",
     ]);
+
+    // Boundary: around the first message yields just the anchor + newer.
+    const firstId = page3.messages[0]?.id ?? "";
+    const aroundFirst = (await (
+      await ctx.app.inject({
+        method: "GET",
+        url: `/api/v1/channels/${channelId}/messages?limit=4&around=${firstId}`,
+        headers: authHeader(owner),
+      })
+    ).json()) as typeof tailBody;
+    expect(aroundFirst.messages.map((entry) => entry.content)).toEqual([
+      "one",
+      "two",
+    ]);
+    expect(aroundFirst.hasMoreBefore).toBe(false);
+    expect(aroundFirst.hasMoreAfter).toBe(true);
+
+    // Boundary: around the last message with limit=1 yields the anchor.
+    const lastId = tailBody.messages[tailBody.messages.length - 1]?.id ?? "";
+    const aroundLast = (await (
+      await ctx.app.inject({
+        method: "GET",
+        url: `/api/v1/channels/${channelId}/messages?limit=1&around=${lastId}`,
+        headers: authHeader(owner),
+      })
+    ).json()) as typeof tailBody;
+    expect(aroundLast.messages.map((entry) => entry.content)).toEqual(["five"]);
+    expect(aroundLast.hasMoreBefore).toBe(true);
+    expect(aroundLast.hasMoreAfter).toBe(false);
   });
 
   it("validates content, channel type and permissions", async () => {

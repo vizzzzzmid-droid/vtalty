@@ -84,7 +84,13 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   // (Vite :5173 -> server :3000); an explicit allowlist is a later hardening.
   await app.register(cors, { origin: true });
   // Coarse global cap; auth routes add stricter per-route limits.
-  await app.register(rateLimit, { max: 300, timeWindow: "1 minute" });
+  // Custom key: the plugin's default generator crashes on requests without
+  // a socket IP (WS upgrades via inject in tests) — fall back instead.
+  await app.register(rateLimit, {
+    max: 300,
+    timeWindow: "1 minute",
+    keyGenerator: (request) => request.ip ?? "unknown",
+  });
   await app.register(cookie);
   await app.register(multipart, {
     limits: { fileSize: deps.env.UPLOAD_MAX_BYTES, files: 10 },

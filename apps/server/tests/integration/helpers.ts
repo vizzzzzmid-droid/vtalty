@@ -7,6 +7,7 @@ import { buildApp } from "../../src/app.js";
 import { createDb, type DbHandle } from "../../src/db/client.js";
 import { runMigrations } from "../../src/db/migrate.js";
 import { loadEnv, type Env } from "../../src/env.js";
+import { voiceStore } from "../../src/modules/voice/store.js";
 import type { LiveKitAdmin } from "../../src/lib/livekit.js";
 
 export interface TestContext {
@@ -43,6 +44,12 @@ export async function setup(overrides?: {
     DATABASE_URL: databaseUrl,
     JWT_ACCESS_SECRET: "integration-secret-32-chars-minimum",
     REGISTRATION_MODE: "invite-only",
+    // Integration suites register far more users per minute than the
+    // production auth limits allow (per-IP buckets); raise them so the
+    // tests exercise logic, not the limiter (which has its own unit tests).
+    RATE_LIMIT_REGISTER_MAX: "1000",
+    RATE_LIMIT_LOGIN_MAX: "1000",
+    RATE_LIMIT_REFRESH_MAX: "1000",
     ...(overrides?.uploadMaxBytes === undefined
       ? {}
       : { UPLOAD_MAX_BYTES: String(overrides.uploadMaxBytes) }),
@@ -70,6 +77,9 @@ export async function setup(overrides?: {
 /** Wipe all domain data between tests (schema_meta and migrations survive). */
 export async function resetDatabase(ctx: TestContext): Promise<void> {
   await ctx.db.db.execute(sql`TRUNCATE users, servers CASCADE`);
+  // The voice presence store is an in-memory singleton: without a reset,
+  // seats leak across tests (ghost participants) even though the DB is clean.
+  voiceStore.reset();
 }
 
 export async function teardown(ctx: TestContext): Promise<void> {

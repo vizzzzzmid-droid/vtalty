@@ -138,7 +138,7 @@ describeIf("voice screen sharing", () => {
     const decodedWith = jwt.decode(
       (withShare.json() as { token: string }).token,
     ) as { video?: Record<string, unknown> } | null;
-    expect(decodedWith?.video?.["can_publish_sources"]).toEqual([
+    expect(decodedWith?.video?.["canPublishSources"]).toEqual([
       "microphone",
       "screen_share",
       "screen_share_audio",
@@ -166,7 +166,7 @@ describeIf("voice screen sharing", () => {
     const decodedWithout = jwt.decode(
       (withoutShare.json() as { token: string }).token,
     ) as { video?: Record<string, unknown> } | null;
-    expect(decodedWithout?.video?.["can_publish_sources"]).toEqual(["microphone"]);
+    expect(decodedWithout?.video?.["canPublishSources"]).toEqual(["microphone"]);
   });
 
   it("caps simultaneous sharers and freezes excess tracks", async () => {

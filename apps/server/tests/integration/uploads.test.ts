@@ -125,8 +125,9 @@ describeIf("uploads", () => {
     expect(served.headers["content-type"]).toBe("image/png");
     expect(served.headers["x-content-type-options"]).toBe("nosniff");
     expect(served.headers["content-disposition"]).toBe("inline");
-    const rawBody = (served as unknown as { rawBody: Buffer }).rawBody;
-    expect(Buffer.compare(rawBody, PNG_1X1)).toBe(0);
+    // light-my-request v6 exposes the raw bytes as `rawPayload` (Buffer).
+    const rawPayload = (served as unknown as { rawPayload: Buffer }).rawPayload;
+    expect(Buffer.compare(rawPayload, PNG_1X1)).toBe(0);
   });
 
   it("rejects spoofed, unsupported and oversized files", async () => {

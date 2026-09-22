@@ -133,17 +133,23 @@ describeIf("voice tokens and webhooks", () => {
       sub?: unknown;
       video?: Record<string, unknown>;
       exp?: unknown;
-      iat?: unknown;
+      nbf?: unknown;
     } | null;
     expect(decoded?.sub).toBe(owner.id);
     expect(decoded?.video).toMatchObject({
       room: voiceId,
-      room_join: true,
-      can_subscribe: true,
-      can_publish_data: false,
+      roomJoin: true,
+      canSubscribe: true,
+      canPublishData: false,
     });
-    expect(decoded?.video?.["can_publish_sources"]).toEqual(["microphone"]);
-    expect((decoded?.exp as number) - (decoded?.iat as number)).toBe(600);
+    expect(decoded?.video?.["canPublishSources"]).toEqual([
+      "microphone",
+      "screen_share",
+      "screen_share_audio",
+    ]);
+    // The SDK sets validity as exp/nbf (no iat claim); TTL 600s verified
+    // against the installed livekit-server-sdk wire format.
+    expect((decoded?.exp as number) - (decoded?.nbf as number)).toBe(600);
   });
 
   it("rejects token requests without access", async () => {
@@ -218,8 +224,10 @@ describeIf("voice tokens and webhooks", () => {
     const decoded = jwt.decode((res.json() as { token: string }).token) as {
       video?: Record<string, unknown>;
     } | null;
-    expect(decoded?.video).toMatchObject({ can_publish: false, can_subscribe: true });
-    expect(decoded?.video?.["can_publish_sources"]).toBeUndefined();
+    // LiveKit JWT grants are camelCase on the wire (verified against the
+    // installed livekit-server-sdk: toJwt passes VideoGrant through as-is).
+    expect(decoded?.video).toMatchObject({ canPublish: false, canSubscribe: true });
+    expect(decoded?.video?.["canPublishSources"]).toBeUndefined();
   });
 
   it("drives presence from webhooks, idempotently", async () => {

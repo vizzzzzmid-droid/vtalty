@@ -8,6 +8,11 @@ const envSchema = z.object({
   JWT_ACCESS_SECRET: z.string().min(32),
   ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(30),
+  // Auth rate limits (per minute, per IP). Operators can raise these;
+  // integration tests run with generous values (see tests/integration).
+  RATE_LIMIT_REGISTER_MAX: z.coerce.number().int().positive().default(10),
+  RATE_LIMIT_LOGIN_MAX: z.coerce.number().int().positive().default(10),
+  RATE_LIMIT_REFRESH_MAX: z.coerce.number().int().positive().default(30),
   WS_TICKET_TTL_SECONDS: z.coerce.number().int().positive().default(30),
   COOKIE_SECURE: z.enum(["true", "false"]).default("false").transform((v) => v === "true"),
   REGISTRATION_MODE: z.enum(["invite-only", "open"]).default("invite-only"),

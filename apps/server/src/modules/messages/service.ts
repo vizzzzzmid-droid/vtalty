@@ -238,8 +238,11 @@ export async function getHistory(
   );
 
   if (query.around !== undefined) {
-    const newerCount = Math.floor(limit / 2);
-    const olderCount = Math.ceil(limit / 2);
+    // Window of `limit` messages containing the anchor, biased toward older
+    // context (chat "jump to message" shows what led here): the anchor plus
+    // older messages fill the older side, the remainder goes newer.
+    const newerCount = Math.floor((limit - 1) / 2);
+    const olderCount = limit - newerCount;
     const newer = await db
       .select()
       .from(messages)
