@@ -293,11 +293,16 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   specs) and compose smoke run in CI; real two-device audio/video is
   covered by `docs/MANUAL_TESTS.md`. The CI `e2e-voice` job is
   `continue-on-error` (experimental) until it proves green.
-- `ci` workflow red on main as of Phase 6b close (pre-existing, NOT from
-  desktop changes — server/web code untouched by 6b): server integration
-  (22 data-assertion failures, e.g. pagination windows shifted — looks
-  like app logic, not flakes; single-fork serialization already applied),
-  web e2e (axe violations + missing elements in chat flow), stack-smoke
-  (HTTP 502 on Caddy `/livekit/rtc` probe). None reproducible here
-  (no Docker/Postgres). Fix in server/web scope with CI iteration, not
-  from this box.
+- `ci` + `desktop` workflows GREEN on main (run 35707866544, 2026-09-22):
+  lint-typecheck-unit-build, integration (51/51), compose, e2e (3/3),
+  stack-smoke full pass incl. native RTC join/publish/presence,
+  backup/restore and restart-reconcile, NSIS + AppImage + Electron smoke.
+  `e2e-voice` (experimental, continue-on-error) still red — real
+  media/ICE in headless CI; MANUAL_TESTS.md stays the bar for voice.
+- Local Postgres 17 installed on this Windows box (winget
+  PostgreSQL.PostgreSQL.17, service postgresql-x64-17, db `vitality` /
+  user `vitality` password `vitality`); integration + e2e now reproducible
+  here. Local Chromium also installed (playwright). No Docker (needs
+  WSL2+reboot) — compose/smoke still CI-only.
+- Past incident, fixed: `docker compose down -v` hung 23 min in CI;
+  smoke teardown now uses `--timeout 30` + explicit `process.exit`.
