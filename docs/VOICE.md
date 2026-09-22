@@ -48,11 +48,13 @@ audio — that network simply blocks WebRTC.
 
 ## TURN/TLS certificates
 
-TURN/TLS on 5349 works without certificates for most clients, but networks
-that intercept TLS (corporate MITM proxies) need a real cert chain:
-set `turn.domain`, `turn.cert_file` and `turn.key_file` in `livekit.yaml`
-(Caddy-managed certs can be bind-mounted read-only). Without it, affected
-clients fall back to TURN/UDP or fail — everything else keeps working.
+TURN/TLS on 5349 is opt-in (commented out in `livekit.example.yaml`):
+LiveKit v1.13 refuses to boot with `tls_port` set but no `turn.domain`
+("TURN domain required" crash loop — caught by the CI smoke). To enable
+it, set `turn.domain` to the public hostname plus `turn.cert_file` /
+`turn.key_file` (Caddy-managed certs can be bind-mounted read-only).
+Without TURN/TLS, affected clients fall back to TURN/UDP or fail —
+everything else keeps working.
 
 ## How voice presence works
 
