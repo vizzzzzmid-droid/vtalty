@@ -57,16 +57,32 @@ async function parseError(res: Response, fallback: string): Promise<ApiError> {
 }
 
 async function rawRequest(path: string, init?: RequestInit): Promise<Response> {
-  return fetch(`${REST_API_BASE}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(accessToken === null
-        ? {}
-        : { Authorization: `Bearer ${accessToken}` }),
-      ...init?.headers,
-    },
-  });
+  const base = init?.headers;
+  const headers: Record<string, string> =
+    base instanceof Headers
+      ? Object.fromEntries(base.entries())
+      : Array.isArray(base)
+        ? Object.fromEntries(base)
+        : { ...(base ?? {}) };
+  // Never claim JSON without a body: Fastify rejects empty application/json
+  // payloads with 400 (this broke bodiless POSTs like ws-ticket, logout and
+  // voice-token in real browsers; inject-based tests never set the header
+  // and stayed green).
+  if (
+    init?.body !== undefined &&
+    headers["Content-Type"] === undefined &&
+    headers["content-type"] === undefined
+  ) {
+    headers["Content-Type"] = "application/json";
+  }
+  if (
+    accessToken !== null &&
+    headers["Authorization"] === undefined &&
+    headers["authorization"] === undefined
+  ) {
+    headers["Authorization"] = `Bearer ${accessToken}`;
+  }
+  return fetch(`${REST_API_BASE}${path}`, { ...init, headers });
 }
 
 /**

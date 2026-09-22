@@ -144,6 +144,7 @@ jobs:
           DATABASE_URL=postgres://vitality:ci-only-password@127.0.0.1:5432/vitality \
           JWT_ACCESS_SECRET=ci-access-secret-please-change-me-32plus \
           UPLOAD_DIR=/tmp/vitality-uploads \
+          REGISTRATION_MODE=open \
           PORT=3000 \
           node apps/server/dist/index.js > /tmp/vitality-server.log 2>&1 &
           for i in $(seq 1 30); do
@@ -236,6 +237,7 @@ jobs:
           DATABASE_URL=postgres://vitality:ci-only-password@127.0.0.1:5432/vitality \
           JWT_ACCESS_SECRET=ci-access-secret-please-change-me-32plus \
           UPLOAD_DIR=/tmp/vitality-uploads \
+          REGISTRATION_MODE=open \
           LIVEKIT_URL=http://127.0.0.1:7880 \
           LIVEKIT_API_KEY=devkey \
           LIVEKIT_API_SECRET=ci-livekit-secret-please-change-me-32plus \

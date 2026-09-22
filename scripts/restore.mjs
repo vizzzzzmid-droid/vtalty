@@ -73,11 +73,13 @@ async function main() {
   const db = env["POSTGRES_DB"] ?? "vitality";
 
   if (sqlFile !== null) {
-    // Recreate an empty schema, then import (plain pg_dump has no --clean).
+    // Recreate empty schemas, then import (plain pg_dump has no --clean).
+    // The drizzle journal lives in its own schema outside public: drop it
+    // too, or the import aborts on "schema drizzle already exists".
     sh("docker", [
       "compose", "exec", "-T", "postgres",
       "psql", "-U", user, "-d", db,
-      "-c", "DROP SCHEMA public CASCADE; CREATE SCHEMA public;",
+      "-c", "DROP SCHEMA public CASCADE; DROP SCHEMA IF EXISTS drizzle CASCADE; CREATE SCHEMA public;",
     ], { cwd: ROOT });
     const sql = readFileSync(path.resolve(sqlFile), "utf8");
     const imported = spawnSync(

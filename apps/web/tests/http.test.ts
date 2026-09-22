@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
   get,
+  post,
   setAccessToken,
   setRefreshHandler,
 } from "../src/api/http.js";
@@ -82,5 +83,34 @@ describe("request", () => {
     );
     await expect(get("/auth/me")).rejects.toBeInstanceOf(ApiError);
     expect(refreshCalls).toBe(0);
+  });
+
+  it("omits content-type on bodiless POSTs (Fastify 400s empty JSON)", async () => {
+    let seen: Record<string, string> = {};
+    let seenBody: unknown = "unset";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        seen = { ...(init?.headers as Record<string, string>) };
+        seenBody = init?.body;
+        return jsonResponse(200, { ok: true });
+      }),
+    );
+    await post("/ws-ticket");
+    expect(seen["Content-Type"]).toBeUndefined();
+    expect(seenBody).toBeUndefined();
+  });
+
+  it("sends content-type with a JSON body", async () => {
+    let seen: Record<string, string> = {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        seen = { ...(init?.headers as Record<string, string>) };
+        return jsonResponse(200, { ok: true });
+      }),
+    );
+    await post("/auth/login", { username: "u", password: "p" });
+    expect(seen["Content-Type"]).toBe("application/json");
   });
 });
