@@ -9,6 +9,7 @@ import type { AppDeps } from "../../app.js";
 import { authenticate } from "../../lib/auth.js";
 import { notFound } from "../../lib/errors.js";
 import { parseBody } from "../../lib/validate.js";
+import { signAttachmentUrl } from "../uploads/signed-urls.js";
 import {
   deleteMessage,
   editMessage,
@@ -27,14 +28,16 @@ function idParam(request: { params: unknown }, kind: string): string {
 }
 
 export function registerMessageRoutes(app: FastifyInstance, deps: AppDeps): void {
-  const { db } = deps;
+  const { db, env } = deps;
+  const signUrl = (attachmentId: string): string =>
+    signAttachmentUrl(env.JWT_ACCESS_SECRET, attachmentId, env.ATTACHMENT_URL_TTL_SECONDS);
 
   app.post(
     "/api/v1/channels/:id/messages",
     { preHandler: [authenticate] },
     async (request, reply) => {
       const body = parseBody(createMessageBodySchema, request.body);
-      const message = await sendMessage(db, request.userId, idParam(request, "Channel"), body);
+      const message = await sendMessage(db, request.userId, idParam(request, "Channel"), body, signUrl);
       reply.code(201);
       return message;
     },
@@ -45,7 +48,7 @@ export function registerMessageRoutes(app: FastifyInstance, deps: AppDeps): void
     { preHandler: [authenticate] },
     async (request) => {
       const query = parseBody(historyQuerySchema, request.query);
-      return getHistory(db, request.userId, idParam(request, "Channel"), query);
+      return getHistory(db, request.userId, idParam(request, "Channel"), query, signUrl);
     },
   );
 
@@ -54,7 +57,7 @@ export function registerMessageRoutes(app: FastifyInstance, deps: AppDeps): void
     { preHandler: [authenticate] },
     async (request) => {
       const body = parseBody(patchMessageBodySchema, request.body);
-      return editMessage(db, request.userId, idParam(request, "Message"), body.content);
+      return editMessage(db, request.userId, idParam(request, "Message"), body.content, signUrl);
     },
   );
 

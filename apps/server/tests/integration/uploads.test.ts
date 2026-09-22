@@ -14,6 +14,7 @@ import {
   type TestUser,
 } from "./helpers.js";
 import { cleanupOrphanUploads } from "../../src/modules/uploads/service.js";
+import { signAttachmentUrl } from "../../src/modules/uploads/signed-urls.js";
 import { LocalStorage } from "../../src/modules/uploads/storage.js";
 
 const PNG_1X1 = Buffer.from(
@@ -114,7 +115,9 @@ describeIf("uploads", () => {
       throw new Error("upload returned no attachments");
     }
     expect(attachment.mime).toBe("image/png");
-    expect(attachment.url).toBe(`/api/v1/attachments/${attachment.id}`);
+    // Signed capability URL (browser <img>/<a> loads send no auth header).
+    expect(attachment.url.startsWith(`/api/v1/attachments/${attachment.id}?e=`)).toBe(true);
+    expect(attachment.url).toContain("&s=");
 
     const served = await ctx.app.inject({
       method: "GET",
@@ -129,6 +132,138 @@ describeIf("uploads", () => {
     const rawPayload = (served as unknown as { rawPayload: Buffer }).rawPayload;
     expect(Buffer.compare(rawPayload, PNG_1X1)).toBe(0);
   });
+  it("serves attachments via a signed URL with no Authorization header", async () => {
+    const owner = await registerUser(ctx, "owner");
+    const servers = (await (
+      await ctx.app.inject({
+        method: "GET",
+        url: "/api/v1/servers",
+        headers: authHeader(owner),
+      })
+    ).json()) as { id: string }[];
+    const serverId = servers[0]?.id ?? "";
+    const state = (await (
+      await ctx.app.inject({
+        method: "GET",
+        url: `/api/v1/servers/${serverId}/state`,
+        headers: authHeader(owner),
+      })
+    ).json()) as { channels: { id: string; name: string }[] };
+    const channelId = state.channels.find((entry) => entry.name === "general")?.id ?? "";
+
+    const up = await upload(ctx, owner, channelId, [
+      { field: "file", filename: "pic.png", contentType: "image/png", data: PNG_1X1 },
+    ]);
+    const [uploaded] = up.json as { id: string; url: string }[];
+    if (uploaded === undefined) {
+      throw new Error("upload returned no attachments");
+    }
+    // The upload response itself already carries a signed URL (chip previews).
+    expect(uploaded.url).toContain("?e=");
+    expect(uploaded.url).toContain("&s=");
+
+    const sent = await ctx.app.inject({
+      method: "POST",
+      url: `/api/v1/channels/${channelId}/messages`,
+      headers: authHeader(owner),
+      payload: { content: "pic", attachmentIds: [uploaded.id] },
+    });
+    expect(sent.statusCode).toBe(201);
+
+    // History payloads carry signed URLs — this is what <img src> consumes.
+    const history = (await (
+      await ctx.app.inject({
+        method: "GET",
+        url: `/api/v1/channels/${channelId}/messages`,
+        headers: authHeader(owner),
+      })
+    ).json()) as { messages: { attachments: { id: string; url: string }[] }[] };
+    const url = history.messages[0]?.attachments[0]?.url ?? "";
+    expect(url.startsWith(`/api/v1/attachments/${uploaded.id}?e=`)).toBe(true);
+    expect(url).toContain("&s=");
+
+    // The browser case: a plain resource load sends no Authorization header.
+    const served = await ctx.app.inject({ method: "GET", url });
+    expect(served.statusCode).toBe(200);
+    expect(served.headers["content-type"]).toBe("image/png");
+    const rawPayload = (served as unknown as { rawPayload: Buffer }).rawPayload;
+    expect(Buffer.compare(rawPayload, PNG_1X1)).toBe(0);
+  });
+
+  it("rejects missing, tampered, expired and foreign download URLs", async () => {
+    const owner = await registerUser(ctx, "owner");
+    const servers = (await (
+      await ctx.app.inject({
+        method: "GET",
+        url: "/api/v1/servers",
+        headers: authHeader(owner),
+      })
+    ).json()) as { id: string }[];
+    const serverId = servers[0]?.id ?? "";
+    const state = (await (
+      await ctx.app.inject({
+        method: "GET",
+        url: `/api/v1/servers/${serverId}/state`,
+        headers: authHeader(owner),
+      })
+    ).json()) as { channels: { id: string; name: string }[] };
+    const channelId = state.channels.find((entry) => entry.name === "general")?.id ?? "";
+
+    const up = await upload(ctx, owner, channelId, [
+      { field: "file", filename: "a.png", contentType: "image/png", data: PNG_1X1 },
+      { field: "file", filename: "b.png", contentType: "image/png", data: PNG_1X1 },
+    ]);
+    const [a, b] = up.json as { id: string; url: string }[];
+    if (a === undefined || b === undefined) {
+      throw new Error("upload returned fewer than two attachments");
+    }
+    await ctx.app.inject({
+      method: "POST",
+      url: `/api/v1/channels/${channelId}/messages`,
+      headers: authHeader(owner),
+      payload: { content: "files", attachmentIds: [a.id, b.id] },
+    });
+
+    // No credentials at all → 401 (the original production failure mode).
+    const bare = await ctx.app.inject({ method: "GET", url: `/api/v1/attachments/${a.id}` });
+    expect(bare.statusCode).toBe(401);
+
+    // Garbage signature → 401.
+    const future = Math.floor(Date.now() / 1000) + 3600;
+    const tampered = await ctx.app.inject({
+      method: "GET",
+      url: `/api/v1/attachments/${a.id}?e=${future}&s=AAAA`,
+    });
+    expect(tampered.statusCode).toBe(401);
+
+    // Validly signed but already expired → 401.
+    const expiredUrl = signAttachmentUrl(
+      ctx.env.JWT_ACCESS_SECRET,
+      a.id,
+      3600,
+      new Date(Date.now() - 2 * 3600 * 1000),
+    );
+    const expired = await ctx.app.inject({ method: "GET", url: expiredUrl });
+    expect(expired.statusCode).toBe(401);
+
+    // A signature minted for attachment B authorizes nothing for A → 401.
+    const bUrl = new URL(b.url, "http://localhost");
+    const foreign = await ctx.app.inject({
+      method: "GET",
+      url: `/api/v1/attachments/${a.id}?e=${bUrl.searchParams.get("e")}&s=${bUrl.searchParams.get("s")}`,
+    });
+    expect(foreign.statusCode).toBe(401);
+
+    // Regression: the Bearer path is unchanged for API clients.
+    const bearer = await ctx.app.inject({
+      method: "GET",
+      url: `/api/v1/attachments/${a.id}`,
+      headers: authHeader(owner),
+    });
+    expect(bearer.statusCode).toBe(200);
+  });
+
+
 
   it("rejects spoofed, unsupported and oversized files", async () => {
     const owner = await registerUser(ctx, "owner");

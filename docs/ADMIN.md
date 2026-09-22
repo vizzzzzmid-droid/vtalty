@@ -28,6 +28,7 @@ defaults when unset.
 | `UPLOAD_MAX_BYTES` | `10485760` | Per-file upload cap (10 MiB). |
 | `UPLOAD_CLEANUP_MAX_AGE_HOURS` | `24` | Orphaned (unclaimed) uploads older than this are purged. |
 | `UPLOAD_CLEANUP_INTERVAL_SECONDS` | `3600` | Purge loop period. |
+| `ATTACHMENT_URL_TTL_SECONDS` | `3600` | Lifetime of HMAC-signed attachment download URLs (header-less `<img>`/`<a>` loads). |
 | `STORAGE_DRIVER` | `local` | Only `local` exists (S3 is a ROADMAP item). |
 | `CADDY_DOMAIN` | `localhost` | Public domain; drives ACME issuance. |
 | `PUBLIC_APP_URL` | `https://localhost` | Informational canonical URL. |

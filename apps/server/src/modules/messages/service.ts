@@ -42,6 +42,7 @@ import {
   requirePermission,
 } from "../../lib/permissions.js";
 import { checkUserRateLimit } from "../../lib/rate-limit.js";
+import type { AttachmentUrlSigner } from "../uploads/signed-urls.js";
 import { broadcastToServers } from "../../ws/hub.js";
 
 const MENTION_RE = new RegExp(MENTION_PATTERN_SOURCE, "g");
@@ -100,6 +101,7 @@ async function resolveMentionIds(
 async function hydrateMessages(
   db: DbOrTx,
   rows: MessageRow[],
+  signUrl: AttachmentUrlSigner,
 ): Promise<ChatMessage[]> {
   if (rows.length === 0) {
     return [];
@@ -141,7 +143,10 @@ async function hydrateMessages(
         filename: attach.filename,
         mime: attach.mime,
         size: attach.bytes,
-        url: `/api/v1/attachments/${attach.id}`,
+        // Signed capability URL: works in plain <img src>/<a href> loads
+        // (no Authorization header possible there). Broadcast-safe — the
+        // HMAC carries no user identity.
+        url: signUrl(attach.id),
         width: attach.width,
         height: attach.height,
       })),
@@ -155,6 +160,7 @@ export async function sendMessage(
   userId: string,
   channelId: string,
   input: CreateMessageBody,
+  signUrl: AttachmentUrlSigner,
 ): Promise<ChatMessage> {
   checkUserRateLimit(`send:${userId}`, 30, 60_000);
   const channel = await findChannelOr404(db, channelId);
@@ -202,7 +208,7 @@ export async function sendMessage(
         .values(mentionedIds.map((mentionedId) => ({ messageId: id, userId: mentionedId })));
     }
     const rows = await tx.select().from(messages).where(eq(messages.id, id));
-    const hydrated = await hydrateMessages(tx, rows);
+    const hydrated = await hydrateMessages(tx, rows, signUrl);
     const message = hydrated[0];
     if (message === undefined) {
       throw new Error("message insert returned no rows");
@@ -228,6 +234,7 @@ export async function getHistory(
   userId: string,
   channelId: string,
   query: HistoryQuery,
+  signUrl: AttachmentUrlSigner,
 ): Promise<HistoryPage> {
   const channel = await findChannelOr404(db, channelId);
   await requireMembership(db, userId, channel.serverId);
@@ -260,7 +267,7 @@ export async function getHistory(
       ...newer.slice(0, newerCount),
     ];
     return {
-      messages: await hydrateMessages(db, merged),
+      messages: await hydrateMessages(db, merged, signUrl),
       hasMoreBefore: older.length > olderCount,
       hasMoreAfter: newer.length > newerCount,
     };
@@ -274,7 +281,7 @@ export async function getHistory(
       .orderBy(asc(messages.id))
       .limit(limit + 1);
     return {
-      messages: await hydrateMessages(db, rows.slice(0, limit)),
+      messages: await hydrateMessages(db, rows.slice(0, limit), signUrl),
       hasMoreBefore: true,
       hasMoreAfter: rows.length > limit,
     };
@@ -289,7 +296,7 @@ export async function getHistory(
     .orderBy(desc(messages.id))
     .limit(limit + 1);
   return {
-    messages: await hydrateMessages(db, rows.slice(0, limit).reverse()),
+    messages: await hydrateMessages(db, rows.slice(0, limit).reverse(), signUrl),
     hasMoreBefore: rows.length > limit,
     hasMoreAfter: query.before !== undefined,
   };
@@ -313,6 +320,7 @@ export async function editMessage(
   userId: string,
   messageId: string,
   content: string,
+  signUrl: AttachmentUrlSigner,
 ): Promise<ChatMessage> {
   const existing = await findMessageOr404(db, messageId);
   if (existing.authorId !== userId) {
@@ -332,7 +340,7 @@ export async function editMessage(
         .values(mentionedIds.map((mentionedId) => ({ messageId, userId: mentionedId })));
     }
     const rows = await tx.select().from(messages).where(eq(messages.id, messageId));
-    return hydrateMessages(tx, rows);
+    return hydrateMessages(tx, rows, signUrl);
   });
   const message = updated[0];
   if (message === undefined) {

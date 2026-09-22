@@ -27,6 +27,8 @@ const envSchema = z.object({
   UPLOAD_CLEANUP_INTERVAL_SECONDS: z.coerce.number().int().positive().default(3600),
   UPLOAD_DIR: z.string().default("/data/uploads"),
   UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(10 * 1024 * 1024),
+  // HMAC-signed download URLs (no Authorization header; <img src> compatible).
+  ATTACHMENT_URL_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
 });
 
 export type Env = z.infer<typeof envSchema>;

@@ -12,6 +12,7 @@ import { HttpError, badRequest, notFound } from "../../lib/errors.js";
 import { isInlineImage, sniffFileType } from "../../lib/magic.js";
 import { requireMembership, requirePermission } from "../../lib/permissions.js";
 import { checkUserRateLimit } from "../../lib/rate-limit.js";
+import type { AttachmentUrlSigner } from "./signed-urls.js";
 import type { UploadStorage } from "./storage.js";
 
 export interface UploadedFile {
@@ -27,13 +28,13 @@ function safeFilename(raw: string): string {
   return trimmed.length > 0 ? trimmed : "file";
 }
 
-function toApiAttachment(row: AttachmentRow): MessageAttachment {
+function toApiAttachment(row: AttachmentRow, url: string): MessageAttachment {
   return {
     id: row.id,
     filename: row.filename,
     mime: row.mime,
     size: row.bytes,
-    url: `/api/v1/attachments/${row.id}`,
+    url,
     width: row.width,
     height: row.height,
   };
@@ -46,6 +47,7 @@ export async function uploadFiles(
   userId: string,
   channelId: string,
   files: UploadedFile[],
+  signUrl: AttachmentUrlSigner,
 ): Promise<MessageAttachment[]> {
   checkUserRateLimit(`upload:${userId}`, 30, 60_000);
   const channelRows = await db
@@ -98,7 +100,7 @@ export async function uploadFiles(
       if (row === undefined) {
         throw new Error("attachment insert returned no rows");
       }
-      saved.push(toApiAttachment(row));
+      saved.push(toApiAttachment(row, signUrl(row.id)));
     } catch (err) {
       await storage.delete(key).catch(() => undefined);
       throw err;
@@ -114,12 +116,7 @@ export interface ServedAttachment {
   inline: boolean;
 }
 
-export async function serveAttachment(
-  db: Db,
-  storage: UploadStorage,
-  userId: string,
-  attachmentId: string,
-): Promise<ServedAttachment> {
+async function findAttachmentRow(db: Db, attachmentId: string): Promise<AttachmentRow> {
   const rows = await db
     .select()
     .from(attachments)
@@ -129,6 +126,31 @@ export async function serveAttachment(
   if (row === undefined) {
     throw notFound("Attachment not found");
   }
+  return row;
+}
+
+async function readStoredFile(storage: UploadStorage, row: AttachmentRow): Promise<ServedAttachment> {
+  let data: Buffer;
+  try {
+    data = await storage.load(row.storageKey);
+  } catch {
+    throw new HttpError(500, "FILE_MISSING", "Stored file is missing");
+  }
+  return {
+    data,
+    mime: row.mime,
+    filename: row.filename,
+    inline: isInlineImage(row.mime),
+  };
+}
+
+export async function serveAttachment(
+  db: Db,
+  storage: UploadStorage,
+  userId: string,
+  attachmentId: string,
+): Promise<ServedAttachment> {
+  const row = await findAttachmentRow(db, attachmentId);
   if (row.messageId === null) {
     // Unclaimed uploads are visible to the uploader only.
     if (row.uploaderId !== userId) {
@@ -165,18 +187,21 @@ export async function serveAttachment(
       throw err;
     }
   }
-  let data: Buffer;
-  try {
-    data = await storage.load(row.storageKey);
-  } catch {
-    throw new HttpError(500, "FILE_MISSING", "Stored file is missing");
-  }
-  return {
-    data,
-    mime: row.mime,
-    filename: row.filename,
-    inline: isInlineImage(row.mime),
-  };
+  return readStoredFile(storage, row);
+}
+
+/**
+ * Serve via a signed capability URL (no Authorization header). No per-user
+ * check here: the HMAC signature is verified by the route preHandler, and
+ * URLs are minted only into member-gated payloads — see signed-urls.ts.
+ */
+export async function serveSignedAttachment(
+  db: Db,
+  storage: UploadStorage,
+  attachmentId: string,
+): Promise<ServedAttachment> {
+  const row = await findAttachmentRow(db, attachmentId);
+  return readStoredFile(storage, row);
 }
 
 export interface CleanupSummary {
