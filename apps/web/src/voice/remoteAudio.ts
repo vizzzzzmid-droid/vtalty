@@ -56,26 +56,14 @@ export function attachRemoteAudio(
   let element: HTMLMediaElement;
   try {
     element = track.attach();
-  } catch (err) {
-    // TEMP-DEBUG(audio): remove after production audio investigation
-    console.log("[audio-debug] track.attach() threw", { identity, error: String(err) });
+  } catch {
     return null;
   }
   if (!(element instanceof HTMLAudioElement)) {
-    // TEMP-DEBUG(audio): remove after production audio investigation
-    console.log("[audio-debug] attach() returned non-audio element", {
-      identity,
-      ctor: element.constructor.name,
-    });
     return null;
   }
   element.dataset["identity"] = identity;
   container.appendChild(element);
-  // TEMP-DEBUG(audio): remove after production audio investigation
-  console.log("[audio-debug] attached ok", {
-    identity,
-    audioElementsInContainer: container.querySelectorAll("audio").length,
-  });
   return element;
 }
 

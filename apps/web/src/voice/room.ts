@@ -217,45 +217,16 @@ function attachHandlers(next: Room, LK: LiveKitModule): void {
       // Screen tracks are opt-in: anything not actively watched is
       // unsubscribed immediately (saves VPS/client bandwidth).
       if ((isScreenVideo || isScreenAudio) && !watching) {
-        // TEMP-DEBUG(audio): remove after production audio investigation
-        console.log("[audio-debug] screen-optout early-return", {
-          identity: participant.identity,
-          kind: track.kind,
-          source: publication.source,
-          isScreenVideo,
-          isScreenAudio,
-          watching,
-        });
-
         publication.setSubscribed(false);
         return;
       }
       if (track.kind === LK.Track.Kind.Audio && snapshot().selfDeafened) {
-        // TEMP-DEBUG(audio): remove after production audio investigation
-        console.log("[audio-debug] deafen early-return", {
-          identity: participant.identity,
-          selfDeafened: snapshot().selfDeafened,
-        });
-
         publication.setSubscribed(false);
         return;
       }
       // Microphone audio must reach a real <audio> element in the DOM or
       // nothing is audible (and per-user volume has nothing to act on).
       // Screen-share audio is tile-owned (StreamTile attaches on watch).
-      // TEMP-DEBUG(audio): remove after production audio investigation
-      console.log("[audio-debug]", {
-        identity: participant.identity,
-        kind: track.kind,
-        source: publication.source,
-        expectedSource: LK.Track.Source.Microphone,
-        sourceMatch: publication.source === LK.Track.Source.Microphone,
-        isScreenVideo,
-        isScreenAudio,
-        watching,
-        selfDeafened: snapshot().selfDeafened,
-      });
-
       if (
         track.kind === LK.Track.Kind.Audio &&
         publication.source === LK.Track.Source.Microphone
@@ -275,12 +246,6 @@ function attachHandlers(next: Room, LK: LiveKitModule): void {
     next,
     LK.RoomEvent.TrackUnsubscribed,
     (track: Track) => {
-      // TEMP-DEBUG(audio): remove after production audio investigation
-      console.log("[audio-debug] TrackUnsubscribed -> detachRemoteAudio", {
-        kind: track.kind,
-        attachedElements: track.attachedElements.length,
-      });
-
       detachRemoteAudio(track);
     },
   );
