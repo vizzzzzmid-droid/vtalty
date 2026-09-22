@@ -306,3 +306,18 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   WSL2+reboot) — compose/smoke still CI-only.
 - Past incident, fixed: `docker compose down -v` hung 23 min in CI;
   smoke teardown now uses `--timeout 30` + explicit `process.exit`.
+- Attachment downloads use short-lived HMAC-signed capability URLs
+  (commit 9e77199, 2026-09-22): browsers cannot send an Authorization
+  header on plain `<img src>`/`<a href>` loads, so the previously
+  Bearer-only `GET /api/v1/attachments/:id` 401'd in the web client.
+  Message/upload payloads now embed `?e=<exp>&s=<hmac>` URLs
+  (`ATTACHMENT_URL_TTL_SECONDS`, default 3600; key derived from
+  `JWT_ACCESS_SECRET`, so rotation kills outstanding URLs). Minting stays
+  member-gated (history/broadcasts/upload response); the Bearer path keeps
+  per-user checks (kicked members keep working URLs only until expiry —
+  documented tradeoff). Tests: `tests/unit/signed-urls.test.ts` +
+  two integration cases in `uploads.test.ts`.
+- `tests/integration/voice.test.ts:360` (voice.state.update WS broadcast,
+  fixed 800 ms wait) flaked once in CI (run 35725467497 attempt 1,
+  2026-09-22); passed on rerun and locally. If it recurs, replace the
+  fixed sleep with a poll-with-deadline assertion.
