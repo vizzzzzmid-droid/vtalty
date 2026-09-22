@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import { IPC_CHANNELS } from "./shared.js";
+import { IPC_CHANNELS, type DesktopBridgeShape } from "./shared.js";
 
 /**
  * Minimal preload bridge. No Node.js access is exposed to renderers
@@ -8,7 +8,7 @@ import { IPC_CHANNELS } from "./shared.js";
  * `window.desktop` — the web app feature-detects it and works unchanged
  * in a normal browser.
  */
-const desktop = {
+const desktop: DesktopBridgeShape = {
   platform: process.platform as "win32" | "linux" | "darwin",
 
   getVersion: (): Promise<string> =>
@@ -33,8 +33,11 @@ const desktop = {
   backToConnect: (): Promise<void> =>
     ipcRenderer.invoke(IPC_CHANNELS.backToConnect),
 
-  notify: (title: string, body: string): Promise<void> =>
-    ipcRenderer.invoke(IPC_CHANNELS.notify, { title, body }),
+  notify: (title: string, body: string, channelId?: string): Promise<void> =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.notify,
+      channelId === undefined ? { title, body } : { title, body, channelId },
+    ),
 
   setBadge: (count: number): Promise<void> =>
     ipcRenderer.invoke(IPC_CHANNELS.setBadge, { count }),
@@ -75,6 +78,24 @@ const desktop = {
     ipcRenderer.on(IPC_CHANNELS.toggleMute, listener);
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.toggleMute, listener);
+    };
+  },
+
+  onNotificationClick: (callback: (channelId: string) => void): (() => void) => {
+    const listener = (_event: unknown, body: unknown): void => {
+      if (
+        typeof body === "object" &&
+        body !== null &&
+        "channelId" in body &&
+        typeof body.channelId === "string" &&
+        body.channelId.length > 0
+      ) {
+        callback(body.channelId);
+      }
+    };
+    ipcRenderer.on(IPC_CHANNELS.notificationClick, listener);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.notificationClick, listener);
     };
   },
 };

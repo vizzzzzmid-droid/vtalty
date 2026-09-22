@@ -1,4 +1,4 @@
-# Desktop — Electron wrapper (Phase 6b, step 1)
+# Desktop — Electron wrapper (Phase 6b, steps 1–2)
 
 Security shell + connect screen + unit tests. The window loads the instance
 URL **remotely** (same-origin web client) after a `/api/v1/health` check.
@@ -26,6 +26,15 @@ URL **remotely** (same-origin web client) after a `/api/v1/health` check.
   toggle-mute uses globalShortcut.
 - No auto-accepted certificate errors anywhere (no
   `setCertificateVerifyProc` / `certificate-error` handler by design).
+- Mention notifications (step 2): the web client calls `notify` with a
+  `channelId` on @-mentions while unfocused; main shows a native
+  `Notification` (skipped when disabled via "Mention notifications" or when
+  focused) and clicking it restores/focuses the window and sends
+  `notification-click` so the client opens the channel.
+- Settings (`vitality-desktop.json` in userData, zod-validated, corrupt
+  files fall back to defaults): minimize-to-tray, start minimized, mention
+  notifications, window bounds/maximized, recent servers (8), global PTT
+  flag + keycode.
 
 ```bash
 pnpm --filter @vitality/desktop lint / typecheck / test

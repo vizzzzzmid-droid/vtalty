@@ -109,6 +109,7 @@ async function init(): Promise<void> {
   }
   bindCheckbox("opt-tray", "minimizeToTray");
   bindCheckbox("opt-start-min", "startMinimized");
+  bindCheckbox("opt-notify", "notificationsEnabled");
   bindCheckbox("opt-ptt", "globalPttEnabled");
   await renderRecent();
 }

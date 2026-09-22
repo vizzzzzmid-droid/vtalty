@@ -9,6 +9,7 @@ import {
 } from "@vitality/shared";
 import { queryClient } from "../api/queryClient.js";
 import { requestWsTicket, type HistoryPage } from "../api/resources.js";
+import { notifyForMessage } from "./notify.js";
 import { usePresenceStore } from "../store/presence.js";
 import { useVoiceConnection } from "../voice/store.js";
 
@@ -69,6 +70,7 @@ function handleFrame(raw: string): void {
         (old) => appendMessage(old, message),
       );
       void queryClient.invalidateQueries({ queryKey: ["unread"] });
+      void notifyForMessage(channelId, message);
       break;
     }
     case "message.update": {

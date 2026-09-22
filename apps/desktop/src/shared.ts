@@ -18,11 +18,11 @@ export const IPC_CHANNELS = {
   setBadge: "vitality:set-badge",
   getSetting: "vitality:get-setting",
   setSetting: "vitality:set-setting",
-  screenSources: "vitality:screen-sources",
   screenPick: "vitality:screen-pick",
   pttKey: "vitality:ptt-key",
   toggleMute: "vitality:toggle-mute",
   showPicker: "vitality:show-picker",
+  notificationClick: "vitality:notification-click",
 } as const;
 
 export const serverUrlSchema = z
@@ -88,7 +88,17 @@ export const recentServerSchema = z.object({
 export const notifySchema = z.object({
   title: z.string().min(1).max(128),
   body: z.string().min(1).max(512),
+  // Optional channel to open when the notification is clicked. Main echoes
+  // it back to the renderer (never to the OS beyond display).
+  channelId: z.string().min(1).max(128).optional(),
 });
+
+export const notificationClickSchema = z.object({
+  channelId: z.string().min(1).max(128),
+});
+
+export type NotifyRequest = z.infer<typeof notifySchema>;
+export type NotificationClick = z.infer<typeof notificationClickSchema>;
 
 export const badgeSchema = z.object({
   count: z.number().int().min(0).max(9999),
@@ -115,6 +125,41 @@ export const pttKeyEventSchema = z.object({
 });
 
 export type ScreenSource = z.infer<typeof screenSourceSchema>;
+
+// Shared contract for `window.desktop`: implemented by the Electron
+// preload, feature-detected by the web client (works unchanged in a plain
+// browser where `window.desktop` is undefined). Keep in sync with
+// apps/desktop/src/preload.ts; breaking changes bump the shape check in
+// apps/web/src/lib/desktop.ts.
+export interface DesktopBridgeShape {
+  platform: "win32" | "linux" | "darwin";
+  getVersion: () => Promise<string>;
+  getCapabilities: () => Promise<{
+    globalPtt: boolean;
+    globalPttReason: string | null;
+    screenPicker: boolean;
+    systemAudio: "windows-loopback" | "unsupported";
+  }>;
+  connectToServer: (url: string) => Promise<{ ok: boolean; error?: string }>;
+  getRecentServers: () => Promise<{ url: string; lastUsed: number }[]>;
+  forgetServer: (url: string) => Promise<void>;
+  backToConnect: () => Promise<void>;
+  notify: (title: string, body: string, channelId?: string) => Promise<void>;
+  setBadge: (count: number) => Promise<void>;
+  getSetting: (key: string) => Promise<unknown>;
+  setSetting: (key: string, value: unknown) => Promise<boolean>;
+  onShowPicker: (
+    callback: (request: {
+      requestId: string;
+      sources: { id: string; name: string; thumbnail: string }[];
+    }) => void,
+  ) => () => void;
+  pickScreenSource: (requestId: string, sourceId: string) => Promise<void>;
+  onPttKey: (callback: (active: boolean) => void) => () => void;
+  onToggleMute: (callback: () => void) => () => void;
+  onNotificationClick: (callback: (channelId: string) => void) => () => void;
+}
+
 
 /**
  * Navigation guard (pure, unit-tested). The main window may only ever show

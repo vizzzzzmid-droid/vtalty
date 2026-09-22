@@ -6,12 +6,15 @@ import {
   isConnectSender,
   isTrustedSender,
   normalizeServerUrl,
+  notificationClickSchema,
   notifySchema,
   screenPickResultSchema,
   serverUrlSchema,
+  type NotificationClick,
+  type NotifyRequest,
 } from "./shared.js";
 import { resolveScreenPick } from "./picker.js";
-import { loadSettings, rememberServer, saveSettings } from "./store.js";
+import { loadSettings, rememberServer, saveSettings, type DesktopSettings } from "./store.js";
 import { validateScreenPickResult } from "./picker.js";
 
 export interface IpcContext {
@@ -21,27 +24,125 @@ export interface IpcContext {
   showConnectScreen: () => void;
 }
 
-/** Sender-frame origin check shared by every handler. */
+/**
+ * Sender-frame origin check for the INVOKED (request/response) handlers.
+ *
+ * `event.senderFrame` is undefined for handlers invoked from a sandboxed
+ * preload (`sandbox: true` drops the frame reference on the main side), so
+ * we fall back to `event.sender.url` (the committed URL of the calling
+ * WebContents). Both are checked against the same rules. Pure, unit-tested
+ * via resolveIpcSenderUrl + isTrustedSender.
+ */
+export function resolveIpcSenderUrl(event: Electron.IpcMainInvokeEvent): string | undefined {
+  const frameUrl: unknown = event.senderFrame?.url;
+  if (typeof frameUrl === "string" && frameUrl.length > 0) {
+    return frameUrl;
+  }
+  try {
+    const contentsUrl: unknown = event.sender?.getURL();
+    if (typeof contentsUrl === "string" && contentsUrl.length > 0) {
+      return contentsUrl;
+    }
+  } catch {
+    // sender destroyed mid-invoke: treat as untrusted.
+  }
+  return undefined;
+}
+
 function trusted(
   event: Electron.IpcMainInvokeEvent,
   context: IpcContext,
 ): boolean {
-  const url: unknown = event.senderFrame?.url;
-  return (
-    typeof url === "string" && isTrustedSender(url, context.instanceOrigin())
-  );
+  return isTrustedSender(resolveIpcSenderUrl(event), context.instanceOrigin());
 }
 
 function denied(event: Electron.IpcMainInvokeEvent, context: IpcContext): boolean {
   return !trusted(event, context);
 }
 
+/**
+ * Renderer-writable settings allowlist (pure, unit-tested). Everything else
+ * in the store (recent servers, window bounds) is main-only.
+ */
+export const WRITABLE_SETTINGS = [
+  "minimizeToTray",
+  "startMinimized",
+  "notificationsEnabled",
+  "globalPttEnabled",
+  "globalPttKeycode",
+] as const;
+
+export type WritableSettingKey = (typeof WRITABLE_SETTINGS)[number];
+
+export function isWritableSettingKey(key: unknown): key is WritableSettingKey {
+  return (
+    typeof key === "string" &&
+    (WRITABLE_SETTINGS as readonly string[]).includes(key)
+  );
+}
+
+/** Read one renderer-visible setting (null for anything else). Pure. */
+export function readAllowedSetting(
+  settings: DesktopSettings,
+  key: unknown,
+): unknown {
+  if (!isWritableSettingKey(key)) {
+    return null;
+  }
+  const record = settings as unknown as Record<string, unknown>;
+  return record[key] ?? null;
+}
+
+/**
+ * Apply a renderer-supplied settings patch (zod-range-checked per field).
+ * Pure: returns the merged settings and whether anything changed.
+ */
+export function applySettingsPatch(
+  settings: DesktopSettings,
+  body: unknown,
+): { next: DesktopSettings; changed: boolean } {
+  if (typeof body !== "object" || body === null) {
+    return { next: settings, changed: false };
+  }
+  const record = body as Record<string, unknown>;
+  const next = { ...settings };
+  let changed = false;
+  for (const key of ["minimizeToTray", "startMinimized", "notificationsEnabled", "globalPttEnabled"] as const) {
+    if (typeof record[key] === "boolean") {
+      next[key] = record[key];
+      changed = true;
+    }
+  }
+  if (
+    typeof record["globalPttKeycode"] === "number" &&
+    Number.isInteger(record["globalPttKeycode"]) &&
+    record["globalPttKeycode"] >= 0 &&
+    record["globalPttKeycode"] <= 65535
+  ) {
+    next.globalPttKeycode = record["globalPttKeycode"];
+    changed = true;
+  }
+  return { next, changed };
+}
+
+/** Validate a notify request body (pure, unit-tested). */
+export function parseNotifyRequest(body: unknown): NotifyRequest | null {
+  const parsed = notifySchema.safeParse(body);
+  return parsed.success ? parsed.data : null;
+}
+
+/** Validate an outbound notification-click payload (pure, unit-tested). */
+export function parseNotificationClick(body: unknown): NotificationClick | null {
+  const parsed = notificationClickSchema.safeParse(body);
+  return parsed.success ? parsed.data : null;
+}
+
 export function registerIpc(context: IpcContext): void {
   // Version/capabilities are safe to expose to both the connect screen and
   // the connected instance (no privileged action, no instance data).
   ipcMain.handle(IPC_CHANNELS.getVersion, (event) => {
-    const url: unknown = event.senderFrame?.url;
-    if (typeof url !== "string") {
+    const url = resolveIpcSenderUrl(event);
+    if (url === undefined) {
       return "unknown";
     }
     const origin = context.instanceOrigin();
@@ -52,8 +153,8 @@ export function registerIpc(context: IpcContext): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.getCapabilities, (event) => {
-    const url: unknown = event.senderFrame?.url;
-    if (typeof url !== "string") {
+    const url = resolveIpcSenderUrl(event);
+    if (url === undefined) {
       return {
         globalPtt: false,
         globalPttReason: "untrusted sender",
@@ -85,8 +186,8 @@ export function registerIpc(context: IpcContext): void {
   ipcMain.handle(IPC_CHANNELS.connectToServer, async (event, body: unknown) => {
     // Connect flow is allowed from the local connect screen (file://) and
     // from the connected instance (back-to-connect uses the same channel).
-    const url: unknown = event.senderFrame?.url;
-    if (typeof url !== "string") {
+    const url = resolveIpcSenderUrl(event);
+    if (url === undefined) {
       return { ok: false, error: "untrusted sender" };
     }
     const origin = context.instanceOrigin();
@@ -121,8 +222,8 @@ export function registerIpc(context: IpcContext): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.getRecentServers, (event) => {
-    const url: unknown = event.senderFrame?.url;
-    if (typeof url !== "string") {
+    const url = resolveIpcSenderUrl(event);
+    if (url === undefined) {
       return [];
     }
     const origin = context.instanceOrigin();
@@ -134,8 +235,8 @@ export function registerIpc(context: IpcContext): void {
 
   ipcMain.handle(IPC_CHANNELS.forgetServer, (event, body: unknown) => {
     // Recent-servers management belongs to the local connect screen.
-    const url: unknown = event.senderFrame?.url;
-    if (typeof url !== "string" || !isConnectSender(url)) {
+    const url = resolveIpcSenderUrl(event);
+    if (url === undefined || !isConnectSender(url)) {
       return;
     }
     const parsedUrl = typeof body === "object" && body !== null && "url" in body ? body.url : null;
@@ -163,14 +264,36 @@ export function registerIpc(context: IpcContext): void {
     if (denied(event, context)) {
       return;
     }
-    const parsed = notifySchema.safeParse(body);
-    if (!parsed.success) {
+    const parsed = parseNotifyRequest(body);
+    if (parsed === null) {
+      return;
+    }
+    if (!loadSettings().notificationsEnabled) {
       return;
     }
     const window = context.window();
-    if (window !== null && !window.isFocused()) {
-      new Notification({ title: parsed.data.title, body: parsed.data.body }).show();
+    if (window === null || window.isDestroyed() || window.isFocused()) {
+      return;
     }
+    const note = new Notification({ title: parsed.title, body: parsed.body });
+    const clickPayload =
+      parsed.channelId !== undefined
+        ? parseNotificationClick({ channelId: parsed.channelId })
+        : null;
+    note.on("click", () => {
+      const target = context.window();
+      if (target !== null && !target.isDestroyed()) {
+        if (target.isMinimized()) {
+          target.restore();
+        }
+        target.show();
+        target.focus();
+        if (clickPayload !== null) {
+          target.webContents.send(IPC_CHANNELS.notificationClick, clickPayload);
+        }
+      }
+    });
+    note.show();
   });
 
   ipcMain.handle(IPC_CHANNELS.setBadge, (event, body: unknown) => {
@@ -209,51 +332,14 @@ export function registerIpc(context: IpcContext): void {
       return null;
     }
     const key = typeof body === "object" && body !== null && "key" in body ? body.key : null;
-    const allowed = new Set([
-      "minimizeToTray",
-      "startMinimized",
-      "globalPttEnabled",
-      "globalPttKeycode",
-    ]);
-    if (typeof key !== "string" || !allowed.has(key)) {
-      return null;
-    }
-    const settings = loadSettings() as unknown as Record<string, unknown>;
-    return settings[key] ?? null;
+    return readAllowedSetting(loadSettings(), key);
   });
 
   ipcMain.handle(IPC_CHANNELS.setSetting, (event, body: unknown) => {
     if (denied(event, context)) {
       return false;
     }
-    if (typeof body !== "object" || body === null) {
-      return false;
-    }
-    const record = body as Record<string, unknown>;
-    const settings = loadSettings();
-    const next = { ...settings };
-    let changed = false;
-    if (typeof record["minimizeToTray"] === "boolean") {
-      next.minimizeToTray = record["minimizeToTray"];
-      changed = true;
-    }
-    if (typeof record["startMinimized"] === "boolean") {
-      next.startMinimized = record["startMinimized"];
-      changed = true;
-    }
-    if (typeof record["globalPttEnabled"] === "boolean") {
-      next.globalPttEnabled = record["globalPttEnabled"];
-      changed = true;
-    }
-    if (
-      typeof record["globalPttKeycode"] === "number" &&
-      Number.isInteger(record["globalPttKeycode"]) &&
-      record["globalPttKeycode"] >= 0 &&
-      record["globalPttKeycode"] <= 65535
-    ) {
-      next.globalPttKeycode = record["globalPttKeycode"];
-      changed = true;
-    }
+    const { next, changed } = applySettingsPatch(loadSettings(), body);
     if (changed) {
       saveSettings(next);
     }

@@ -22,6 +22,7 @@ const SettingsModal = lazy(() =>
 );
 import { useSessionStore } from "./store/session.js";
 import { useUiStore } from "./store/ui.js";
+import { getDesktopBridge, parseNotificationClick } from "./lib/desktop.js";
 import {
   armUnloadCleanup,
   setPttActive,
@@ -47,11 +48,26 @@ function Shell(): React.JSX.Element {
   const selectedServerId = useUiStore((state) => state.selectedServerId);
   const selectedChannelId = useUiStore((state) => state.selectedChannelId);
   const selectServer = useUiStore((state) => state.selectServer);
+  const selectChannel = useUiStore((state) => state.selectChannel);
   const mobileNavOpen = useUiStore((state) => state.mobileNavOpen);
   const setMobileNav = useUiStore((state) => state.setMobileNav);
   const mobileMembersOpen = useUiStore((state) => state.mobileMembersOpen);
   const setMobileMembers = useUiStore((state) => state.setMobileMembers);
   const [switcherOpen, setSwitcherOpen] = useState(false);
+
+  // Desktop: a clicked mention notification focuses the window (main) and
+  // asks us to open the channel. Unknown ids render MainView — safe.
+  useEffect(() => {
+    const bridge = getDesktopBridge();
+    if (bridge === null) {
+      return;
+    }
+    return bridge.onNotificationClick((channelId) => {
+      if (parseNotificationClick({ channelId }) !== null) {
+        selectChannel(channelId);
+      }
+    });
+  }, [selectChannel]);
 
   // Ctrl+K / Cmd+K quick channel switcher.
   useEffect(() => {
@@ -68,8 +84,17 @@ function Shell(): React.JSX.Element {
   const serversQuery = useQuery({ queryKey: ["servers"], queryFn: fetchServers });
 
   // Voice lifecycle: unload cleanup, mute shortcut, push-to-talk keys.
+  // Inside the desktop app the main process ALSO forwards global PTT
+  // hold/release (uiohook key-up/down) and a global mute toggle via
+  // window.desktop — the tab-focused handlers below stay as fallback.
   useEffect(() => {
     armUnloadCleanup();
+    const bridge = getDesktopBridge();
+    const offPtt = bridge?.onPttKey((active) => setPttActive(active));
+    const offMute = bridge?.onToggleMute(() => {
+      const voice = useVoiceConnection.getState();
+      void setSelfMuted(!voice.selfMuted);
+    });
     const isFormTarget = (target: EventTarget | null): boolean =>
       target instanceof HTMLElement &&
       (target.tagName === "INPUT" ||
@@ -102,6 +127,8 @@ function Shell(): React.JSX.Element {
     return () => {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
+      offPtt?.();
+      offMute?.();
     };
   }, []);
 

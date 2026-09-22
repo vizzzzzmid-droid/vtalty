@@ -186,10 +186,7 @@ function createWindow(startMinimized: boolean): void {
             callback({});
             return;
           }
-          const { sourceId } = await (async () => {
-            const picked = await requestScreenPick(window);
-            return { sourceId: picked.sourceId };
-          })();
+          const { sourceId } = await requestScreenPick(window);
           if (sourceId === null) {
             callback({});
             return;

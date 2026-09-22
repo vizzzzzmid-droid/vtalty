@@ -26,6 +26,7 @@ const settingsSchema = z.object({
   windowMaximized: z.boolean().default(false),
   startMinimized: z.boolean().default(false),
   minimizeToTray: z.boolean().default(true),
+  notificationsEnabled: z.boolean().default(true),
   globalPttEnabled: z.boolean().default(false),
   globalPttKeycode: z.number().int().min(0).max(65535).default(41),
   globalMuteShortcut: z.boolean().default(true),
@@ -39,6 +40,7 @@ const DEFAULTS: DesktopSettings = {
   windowMaximized: false,
   startMinimized: false,
   minimizeToTray: true,
+  notificationsEnabled: true,
   globalPttEnabled: false,
   globalPttKeycode: 41, // Backquote (`) in uiohook keycodes
   globalMuteShortcut: true,

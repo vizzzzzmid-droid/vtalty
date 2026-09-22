@@ -117,8 +117,10 @@ assertions are manual-only.
       the UI explains the fallback (in-app PTT while focused).
 - [ ] `Ctrl+Shift+M` toggles mute globally. Minimize hides to tray; tray
       "Show" restores; single instance (second launch focuses the first).
-- [ ] Mention while unfocused shows a native notification; badge count tracks
-      unread on supported platforms.
+- [ ] Mention while unfocused shows a native notification; clicking it focuses
+      the window and opens the channel; badge count tracks unread on
+      supported platforms. Disabling "Mention notifications" in connect-screen
+      settings silences them.
 - [ ] Kill the app mid-call config: window bounds + settings persist; corrupt
       `vitality-desktop.json` falls back to defaults (no crash).
 - [ ] Self-signed `https://localhost` fails closed ("unreachable") until the

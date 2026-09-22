@@ -10,6 +10,7 @@ import {
 } from "../voice/room.js";
 import { useVoiceConnection } from "../voice/store.js";
 import { useVoiceSettings } from "../voice/settings.js";
+import { getDesktopBridge } from "../lib/desktop.js";
 import { Field, inputClass } from "./ui.js";
 
 const supportsOutputSelection =
@@ -347,8 +348,8 @@ export function VoiceAudioTab(): React.JSX.Element {
             checked={settings.pttEnabled}
             onChange={(event) => settings.set({ pttEnabled: event.target.checked })}
           />
-          Hold-to-talk (web: works while the tab is focused; a global hotkey
-          needs the desktop app in Phase 6)
+          Hold-to-talk (web: works while the tab is focused
+          <DesktopPttNote />)
         </label>
         {settings.pttEnabled ? (
           <button
@@ -376,6 +377,36 @@ export function VoiceAudioTab(): React.JSX.Element {
       )}
     </div>
   );
+}
+
+/** Desktop hint under the PTT toggle (feature-detected, browser-safe). */
+function DesktopPttNote(): React.JSX.Element {
+  const [text, setText] = useState<string | null>(null);
+  useEffect(() => {
+    const bridge = getDesktopBridge();
+    if (bridge === null) {
+      return;
+    }
+    let cancelled = false;
+    void bridge
+      .getCapabilities()
+      .then((caps) => {
+        if (cancelled) {
+          return;
+        }
+        setText(
+          caps.globalPttReason !== null
+            ? `; desktop global PTT unavailable: ${caps.globalPttReason}`
+            : "; desktop app: global hold-to-talk works even unfocused (enable it on the connect screen), Ctrl+Shift+M toggles mute",
+        );
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  // In a plain browser the parenthetical just ends after "focused".
+  return <span>{text ?? ""}</span>;
 }
 
 function KeyCapture({
