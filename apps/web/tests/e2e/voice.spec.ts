@@ -46,15 +46,18 @@ async function apiRegister(
   }
 }
 
-async function apiInvite(owner: ApiUser, serverId: string): Promise<string> {
+async function apiInvite(owner: ApiUser, serverId: string): Promise<string | undefined> {
   const request = await playwrightRequest.newContext({ baseURL: API });
   try {
     const res = await request.post(`/api/v1/servers/${serverId}/invites`, {
       headers: { authorization: `Bearer ${owner.accessToken}` },
       data: {},
     });
+    // Order-independent: with open registration the second spec's user is
+    // a plain member and cannot mint invites — members join voice fine
+    // without one, so fall back instead of failing.
     if (!res.ok()) {
-      throw new Error(`invite failed: ${res.status()}`);
+      return undefined;
     }
     return ((await res.json()) as { code: string }).code;
   } finally {
@@ -126,6 +129,22 @@ test("two users join voice, mute/deafen propagate, outsider still sees list", as
     await expect(
       pageC.getByRole("button", { name: /Voice options for vowner/ }),
     ).toBeVisible({ timeout: 30000 });
+
+    // Regression (no-audio bug): every subscribed remote mic track must be
+    // attached to a REAL <audio> element with a live srcObject — without
+    // it nothing is audible and volume sliders do nothing.
+    await expect
+      .poll(
+        async () =>
+          pageB.evaluate(
+            () =>
+              Array.from(document.querySelectorAll("audio")).filter(
+                (element) => element.srcObject instanceof MediaStream,
+              ).length,
+          ),
+        { timeout: 30000 },
+      )
+      .toBeGreaterThan(0);
 
     // A mutes -> B sees the muted icon.
     await pageA.getByRole("button", { name: "Mute microphone" }).click();
