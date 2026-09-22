@@ -16,7 +16,7 @@ function run(cmd, args) {
   }
 }
 
-const forwarded = process.argv.slice(2);
+const forwarded = process.argv.slice(2).filter((arg) => arg !== "--");
 const hasTarget = forwarded.some((arg) => arg === "--win" || arg === "--linux" || arg === "--mac" || arg === "--dir");
 const defaults =
   process.platform === "win32" ? ["--win", "nsis"] : process.platform === "darwin" ? ["--dir"] : ["--linux", "AppImage"];
