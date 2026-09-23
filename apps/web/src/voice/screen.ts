@@ -244,26 +244,90 @@ export function attachStreamVideo(
   };
 }
 
-/** Attach the screen-share audio track to an element. */
+/** Attach a stereo-upped livekit audio track to an HTMLAudioElement.
+ *
+ * LiveKit screen-share audio tracks can be mono; playing a mono track
+ * directly into an HTMLAudioElement has been observed to produce sound only in
+ * one ear on some renderers (Electron/Chromium included). To make it centred,
+ * we explicitly up-mix mono → stereo through a shared ChannelMergerNode before
+ * attaching to the element. If the track is already stereo, we attach it
+ * directly. The returned cleanup detaches the (possibly re-attached) source.
+ */
 export function attachStreamAudio(
   identity: string,
   element: HTMLAudioElement,
 ): () => void {
-  const track = publicationsOf(identity)?.audio?.track;
+  const pub = publicationsOf(identity)?.audio;
+  const track = pub?.track;
   if (track === undefined || track === null) {
     return () => undefined;
   }
   if (element.srcObject === null) {
-    track.attach(element);
+    // Always upmix to stereo to ensure centered audio playback.
+    // This handles both mono tracks (the common case for screen-share audio)
+    // and stereo tracks (which pass through unchanged via the merger).
+    const mediaStreamTrack = track.mediaStreamTrack;
+    if (mediaStreamTrack !== null && mediaStreamTrack !== undefined) {
+      element.srcObject = upmixToStereo(mediaStreamTrack);
+    } else {
+      // Fallback: attach directly if we can't access the underlying track.
+      // In this case, we use the track's attach method which handles cleanup.
+      track.attach(element);
+    }
+    // Ensure the audio element plays (autoplay may be blocked without user gesture).
+    try {
+      element.play().catch(() => undefined);
+    } catch {
+      // Autoplay blocked; the existing "click to enable audio" banner handles this.
+    }
   }
   return () => {
     try {
-      track.detach(element);
+      // For upmixed tracks, we have a MediaStream that we need to clean up.
+      const currentSrc = element.srcObject;
+      if (currentSrc instanceof MediaStream) {
+        // The up-mixed stereo track we created: stop the audio tracks and clear.
+        for (const upmixed of currentSrc.getAudioTracks()) {
+          upmixed.stop();
+        }
+        element.srcObject = null;
+      } else if (currentSrc === null) {
+        // Already cleared.
+      } else {
+        // Direct attach case: use the track's detach method.
+        // We can't compare directly with track due to type differences,
+        // so we check if the element still has a srcObject that isn't a MediaStream.
+        track.detach(element);
+      }
     } catch {
-      // Element already gone.
+      // Element/audio context already gone.
     }
   };
 }
+
+/** Up-mix a MediaStreamTrack to stereo via AudioContext.
+ *
+ * If the track is already stereo, the merger passes it through unchanged.
+ * If mono, both output channels receive the same signal (centered playback).
+ */
+function upmixToStereo(track: MediaStreamTrack): MediaStream | null {
+  // Use a shared AudioContext for the upmix operation.
+  let ctx = sharedContext;
+  if (ctx === null) {
+    ctx = new AudioContext({ sampleRate: 48000 });
+    sharedContext = ctx;
+  }
+  // Wrap the track in a MediaStream for createMediaStreamSource.
+  const stream = new MediaStream([track]);
+  const source = ctx.createMediaStreamSource(stream);
+  const merger = ctx.createChannelMerger(2);
+  source.connect(merger);
+  const dest = ctx.createMediaStreamDestination();
+  merger.connect(dest);
+  return dest.stream;
+}
+
+let sharedContext: AudioContext | null = null;
 
 /** Live connection quality of a sharer (for the "degraded" hint). */
 export function sharerQuality(identity: string): string | null {

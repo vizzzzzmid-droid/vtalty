@@ -29,6 +29,7 @@ export type MediaPermission =
   | "media"
   | "display-capture"
   | "notifications"
+  | "fullscreen"
   | "other";
 
 /** Only media-ish permissions for the instance origin are ever granted. */
@@ -50,7 +51,8 @@ export function decidePermission(
   if (
     permission === "media" ||
     permission === "display-capture" ||
-    permission === "notifications"
+    permission === "notifications" ||
+    permission === "fullscreen"
   ) {
     return permission;
   }

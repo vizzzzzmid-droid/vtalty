@@ -185,7 +185,12 @@ export function StreamTile({
               if (document.fullscreenElement !== null) {
                 void document.exitFullscreen();
               } else {
-                void boxRef.current?.requestFullscreen().catch(() => undefined);
+                // Request fullscreen on the video element for better compatibility
+                // (some browsers/Electron require the media element, not the container).
+                void videoRef.current?.requestFullscreen().catch(() =>
+                  // Fallback to container if video fullscreen fails.
+                  boxRef.current?.requestFullscreen().catch(() => undefined),
+                );
               }
             }}
             className="rounded p-1 [color:var(--text-muted)] hover:[color:var(--text-primary)]"

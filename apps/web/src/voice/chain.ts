@@ -27,11 +27,16 @@ export interface MicChain {
 
 /**
  * Microphone processor chain:
- *   getUserMedia → [RNNoise?] → [gate?] → gain → analyser → destination
+ *   getUserMedia → [RNNoise?] → [gate?] → gain → analyser → [upmix?] → destination
  * Publishing the processed track (instead of the raw mic track) is what
  * makes suppression pluggable. Enhanced mode forces a 48 kHz context
  * (RNNoise requirement) and disables the browser noiseSuppression stage to
  * avoid double processing.
+ *
+ * When noise suppression is active (RNNoise processes mono), the final output
+ * is up-mixed to stereo so it plays centred rather than in one ear. Standard
+ * mode (browser processing) may already be stereo, so we only up-mix when the
+ * source is mono.
  */
 export async function buildMicChain(options: MicChainOptions): Promise<MicChain> {
   const constraints: MediaTrackConstraints = {};
@@ -87,10 +92,30 @@ export async function buildMicChain(options: MicChainOptions): Promise<MicChain>
     const analyser = context.createAnalyser();
     analyser.fftSize = 512;
     gain.connect(analyser);
+
+    // Up-mix mono → stereo when noise suppression is active (RNNoise outputs mono).
+    // This prevents the "left ear only" symptom on some renderers (Electron/Chromium
+    // included). Standard mode may already be stereo; we only up-mix when needed.
+    let finalNode: AudioNode = analyser;
+    if (options.noiseMode === "enhanced" || options.noiseSuppression) {
+      const sourceNode = gain;
+      try {
+        if (sourceNode.channelCount === 1) {
+          const merger = context.createChannelMerger(2);
+          sourceNode.connect(merger);
+          // Route both channels of the merger to the analyser (for the meter) and destination.
+          merger.connect(analyser);
+          finalNode = merger;
+        }
+      } catch {
+        // channelCount may not be readable yet; fall back to direct connection.
+      }
+    }
+
     const destination = context.createMediaStreamDestination();
-    analyser.connect(destination);
+    finalNode.connect(destination);
     if (options.loopback) {
-      analyser.connect(context.destination);
+      finalNode.connect(context.destination);
     }
 
     const track = destination.stream.getAudioTracks()[0];
