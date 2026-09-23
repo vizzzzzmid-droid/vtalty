@@ -18,9 +18,25 @@ import {
 } from "./ptt.js";
 import { loadSettings, saveSettings } from "./store.js";
 import { openExternalSafe, registerIpc } from "./ipc.js";
+import { APP_ID } from "./identity.js";
 
 // Compiled CJS layout: __dirname is dist/, one level below the app root.
 const ROOT = path.resolve(__dirname, "..");
+
+// Windows app identity (AppUserModelID). electron-builder's NSIS installer
+// stamps `${APP_ID}` onto the shortcuts it creates (installer.nsh →
+// WinShell::SetLnkAUMI), while Electron only sets an explicit AUMID if the app
+// asks for one: its fallback is `electron.app.<product_name read from the exe
+// version resource>` (shell/common/application_info_win.cc → GetRawAppUserModelID;
+// "electron.app.Electron" in an unpackaged run). Those two identities never
+// match, so Windows saw the app's processes/windows as a different application
+// than its own shortcuts — Task Manager listed the processes as flat,
+// ungrouped entries and notifications/taskbar fell back to the Electron
+// identity. One explicit AUMID shared by processes, windows and shortcuts is
+// the documented requirement (see src/identity.ts). Must run before any UI.
+if (process.platform === "win32") {
+  app.setAppUserModelId(APP_ID);
+}
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;

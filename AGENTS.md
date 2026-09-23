@@ -21,9 +21,12 @@
 - Full plan: `docs/ARCHITECTURE.md` (read it first). Deferred items:
   `docs/ROADMAP.md`. Manual voice test checklist: `docs/MANUAL_TESTS.md`
   (from Phase 4).
-- Current phase: **Phase 6b — DONE (all 3 steps committed)**. Desktop
-  workflow green on main (NSIS + AppImage, Electron smoke in CI, installer
-  contents inspected). `ci` workflow still red on pre-existing server/web
+- Current phase: **Phase 6b — DONE (all 3 steps committed) + Windows
+  AppUserModelID/metadata fix**. Desktop workflow green on main (NSIS +
+  AppImage, Electron smoke in CI, installer contents inspected); the fix
+  declares the explicit AUMID = `appId` before any UI and aligns
+  productName/executableName (details in §7, manual Task Manager check in
+  docs/MANUAL_TESTS.md). `ci` workflow still red on pre-existing server/web
   failures (integration data assertions, e2e app asserts, smoke LiveKit
   502) — documented below, out of desktop scope, not reproducible on this
   box (no Docker/PG). STOP after reporting, wait for "continue".
@@ -258,12 +261,55 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   build, compose env, migrate secret, vite host, executableName, AppImage
   metadata, dist.mjs `--` strip, uploads chown). Residual red in `ci`
   workflow is pre-existing server/web breakage (see §8).
+- [x] Phase 6b fix — Windows AppUserModelID / packaging metadata. The app never
+  declared an explicit AUMID, so Electron's fallback won:
+  `electron.app.<product_name>` read from the exe version resource
+  (`shell/common/application_info_win.cc` → `GetRawAppUserModelID`), i.e.
+  `electron.app.Electron` for unpackaged runs — never equal to the
+  `shop.kirskiy.vitality` that electron-builder's NSIS stamps on the shortcuts
+  (`installer.nsh` → `WinShell::SetLnkAUMI ${APP_ID}`). Windows resolves
+  taskbar/Task Manager identity per AppUserModelID, so the processes/windows did
+  not belong to the app's own shortcuts (flat, ungrouped entries). Fix:
+  `app.setAppUserModelId(APP_ID)` at module top level before any UI (MS:
+  "during an application's initial startup routine before the application
+  presents any UI"); new `src/identity.ts` (APP_ID = appId, PRODUCT_NAME);
+  `productName: vitality` added to `package.json` (app.getName()/userData no
+  longer the scoped `@vitality/desktop`); `executableName` changed
+  `vitality-desktop` → `vitality` so the exe InternalName matches
+  ProductName/FileDescription (`winPackager.js` derives InternalName from the
+  exe basename). Tests: `tests/metadata.test.ts` (7 tests: appId↔APP_ID,
+  productName↔productName↔PRODUCT_NAME, exe name, shortcutName,
+  author/description/copyright/version sources, AUMID wired in main) plus an
+  `app.getName()`/userData assertion in the Playwright-Electron smoke (now 6).
+  Verified locally: lint/tsc clean, 58 unit tests green, smoke 6/6 on real
+  Windows Electron, `pnpm build`. NOT verified locally: NSIS packaging
+  (`@electron/rebuild` needs MSVC, absent on this box) and the Task Manager
+  visual — manual rows added to `docs/MANUAL_TESTS.md`; the CI desktop rebuild
+  is the packaging check.
 
 ## 8. Known issues / risks
 
 - `@sapphi-red/web-noise-suppressor` 0.4.1 (MIT) verified with the Vite 8
   build (worklet + wasm ship in dist, asserted in CI); needs 48 kHz +
   AudioWorklet + WASM, otherwise auto-falls back to Standard with notice.
+- Desktop packaging cannot be built on this Windows box:
+  `pnpm --filter @vitality/desktop dist` stops in `@electron/rebuild` for
+  `uiohook-napi` ("Could not find any Visual Studio installation to use"), so
+  the NSIS installer, the exe version resource and the AppImage are CI-only
+  (windows-latest/ubuntu-latest have the toolchains). Do not read a local
+  `dist` failure as a config error.
+- `executableName` must stay a plain file-safe name: the AppImage target
+  validates `executableName`/`productFilename` with
+  `validateCriticalPathString` (letters, digits, hyphens, underscores, dots,
+  spaces) and rejects the scoped workspace name `@vitality/desktop` — that is
+  what forced `executableName` in the first place (commit eda6710). It is now
+  `vitality`, i.e. equal to `productName`.
+- The Windows AppUserModelID can only be observed for the *current* process
+  (`GetCurrentProcessExplicitAppUserModelID`); `GetApplicationUserModelId`
+  (appmodel.h) reports `APPMODEL_ERROR_NO_APPLICATION` for every non-MSIX
+  process (the docs' own sample prints "Desktop application" for it), so it is
+  useless for verifying the shell AUMID. The Task Manager grouping check stays
+  manual (docs/MANUAL_TESTS.md) on a machine with the packaged app installed.
 - NO local Docker on this Windows machine (Docker Desktop needs WSL2+reboot;
   skipped). Therefore `docker compose up` smoke test was NOT run here — it
   MUST be run on the Ubuntu VPS (`cp .env.example .env &&

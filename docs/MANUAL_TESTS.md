@@ -134,3 +134,15 @@ assertions are manual-only.
 - [ ] Packaging: install the CI NSIS `.exe` on Windows (unsigned →
       SmartScreen prompt is expected) and the AppImage on Linux; the app
       starts, PTT hook loads natively, no missing-`.node` errors in the log.
+- [ ] Windows identity: Task Manager (`Ctrl+Shift+Esc`) shows ONE collapsible
+      app entry named "vitality" (with its GPU/renderer children nested
+      inside) instead of several flat `vitality.exe`/Electron entries; the
+      taskbar button, jump list and notification title/icon show "vitality",
+      not "Electron". Check the exe version resource (right-click
+      `vitality.exe` → Properties → Details): FileDescription/ProductName =
+      `vitality`, InternalName/OriginalFilename = `vitality.exe`...,
+      CompanyName = `vitality contributors`, LegalCopyright =
+      `Copyright © 2026 vitality contributors`, FileVersion = ProductVersion
+      = the package version.
+      (The AppUserModelID is `shop.kirskiy.vitality` — same as `appId`, the
+      value electron-builder stamps on the shortcuts it creates.)

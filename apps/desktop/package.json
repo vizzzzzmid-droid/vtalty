@@ -1,6 +1,7 @@
 {
   "name": "@vitality/desktop",
   "version": "0.1.0",
+  "productName": "vitality",
   "private": true,
   "description": "Self-hosted voice and text for friends (Electron wrapper)",
   "author": {

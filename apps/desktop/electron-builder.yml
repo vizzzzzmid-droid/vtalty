@@ -1,8 +1,14 @@
 appId: shop.kirskiy.vitality
 productName: vitality
-# The workspace package name (@vitality/desktop) is not a safe executable
-# name (AppImage rejects the @); use a plain one on every platform.
-executableName: vitality-desktop
+# Keep the executable name IDENTICAL to productName. electron-builder writes
+# the executable's basename into the Windows version resource as `InternalName`
+# (app-builder-lib/out/winPackager.js), so any difference ships two names for
+# one app: `vitality-desktop` (exe/InternalName) vs `vitality`
+# (ProductName/FileDescription, shortcut name, AUMID). It also has to be a
+# plain file-safe name: the workspace package name (@vitality/desktop) is
+# rejected by the AppImage target's validateCriticalPathString, so it must
+# never be derived from `name`.
+executableName: vitality
 copyright: Copyright © 2026 vitality contributors
 asarUnpack:
   # uiohook-napi ships a native .node binary: keep it unpacked so the OS

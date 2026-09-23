@@ -26,6 +26,23 @@ URL **remotely** (same-origin web client) after a `/api/v1/health` check.
   toggle-mute uses globalShortcut.
 - No auto-accepted certificate errors anywhere (no
   `setCertificateVerifyProc` / `certificate-error` handler by design).
+- Windows identity (AUMID): `app.setAppUserModelId(APP_ID)` runs at startup
+  before the first window, where `APP_ID` = `shop.kirskiy.vitality` — the same
+  value electron-builder's NSIS installer stamps on the shortcuts it creates
+  (`WinShell::SetLnkAUMI ${APP_ID}`). Without an explicit ID Electron falls
+  back to `electron.app.<product_name>` (`product_name` comes from the exe
+  version resource; `electron.app.Electron` in an unpackaged run,
+  `shell/common/application_info_win.cc`), which never equals the installer's
+  `appId` — Windows then treats the processes/windows as a different
+  application than the app's own shortcuts, so Task Manager shows flat,
+  ungrouped entries and notifications/taskbar fall back to the Electron
+  identity. `productName: vitality` in `package.json` keeps `app.getName()`
+  (and the `userData` directory) off the scoped package name
+  `@vitality/desktop`, and `executableName: vitality` in `electron-builder.yml`
+  keeps the exe basename (InternalName) equal to ProductName/FileDescription.
+  `tests/metadata.test.ts` guards config ↔ code consistency,
+  `tests/electron/connect.spec.mts` asserts `app.getName()`/`userData` at
+  runtime.
 - Mention notifications (step 2): the web client calls `notify` with a
   `channelId` on @-mentions while unfocused; main shows a native
   `Notification` (skipped when disabled via "Mention notifications" or when

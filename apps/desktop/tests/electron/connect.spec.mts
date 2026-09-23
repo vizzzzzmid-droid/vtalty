@@ -54,6 +54,19 @@ test("capabilities report the screen picker", async () => {
   expect(["windows-loopback", "unsupported"]).toContain(caps.systemAudio);
 });
 
+test("runtime identity matches the packaged metadata", async () => {
+  // package.json `productName` (not the scoped @vitality/desktop package name)
+  // must drive app.getName() — it names the userData dir and, on Windows, the
+  // default app identity. Runs on Linux CI too; the AUMID itself is Windows-only
+  // and is covered by the packaged-app checks in docs/MANUAL_TESTS.md.
+  const identity = await app.evaluate(({ app: electronApp }) => ({
+    name: electronApp.getName(),
+    userData: electronApp.getPath("userData"),
+  }));
+  expect(identity.name).toBe("vitality");
+  expect(identity.userData.replace(/[\\/]+$/, "").endsWith("vitality")).toBe(true);
+});
+
 test("screenPick with no pending request resolves false", async () => {
   const result = await page.evaluate(() =>
     window.desktop.pickScreenSource("no-such-request", "screen:0:0"),
