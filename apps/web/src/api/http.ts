@@ -86,10 +86,11 @@ async function rawRequest(path: string, init?: RequestInit): Promise<Response> {
 }
 
 /**
- * Authenticated JSON request. On 401 (non-auth paths) tries one silent
- * refresh and retries once. Parallel 401s may trigger parallel refreshes;
- * acceptable for a 50-user instance (server rotation is idempotent-safe:
- * only the first refresh wins, others re-login).
+ * Authenticated JSON request. On 401 (non-auth paths) tries one silent refresh
+ * and retries once. A burst of parallel 401s shares a single in-flight refresh
+ * (single-flight in api/refresh.ts), and the server tolerates refresh-cookie
+ * reuse inside its rotation grace window — so a burst can no longer revoke
+ * the session family and log an active user out.
  */
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res = await rawRequest(path, init);

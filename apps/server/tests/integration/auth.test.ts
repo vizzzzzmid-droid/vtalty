@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, expect, it } from "vitest";
 import { serverStateSchema } from "@vitality/shared";
 import {
@@ -140,7 +141,7 @@ describeIf("auth flow", () => {
     expect(succeeded).toHaveLength(1);
   });
 
-  it("rotates refresh tokens and detects reuse", async () => {
+  it("rotates refresh tokens", async () => {
     const user = await registerUser(ctx, "rotator");
     const first = await ctx.app.inject({
       method: "POST",
@@ -149,8 +150,61 @@ describeIf("auth flow", () => {
     });
     expect(first.statusCode).toBe(200);
     const secondCookie = extractRefreshCookie(first.headers);
+    expect(secondCookie).not.toBe(user.refreshCookie);
+  });
 
-    // Old (rotated) cookie is now revoked.
+  it("tolerates reuse of the just-rotated cookie and keeps the session alive", async () => {
+    // Regression (reported: aggressive re-auth during active use): parallel
+    // tabs / a burst of 401s resend the pre-rotation cookie before the
+    // winner's Set-Cookie lands. That used to look like theft → family
+    // revoked → user logged out while actively using the app.
+    const user = await registerUser(ctx, "parrot");
+    const first = await ctx.app.inject({
+      method: "POST",
+      url: "/api/v1/auth/refresh",
+      headers: { cookie: user.refreshCookie },
+    });
+    expect(first.statusCode).toBe(200);
+    const secondCookie = extractRefreshCookie(first.headers);
+
+    const loser = await ctx.app.inject({
+      method: "POST",
+      url: "/api/v1/auth/refresh",
+      headers: { cookie: user.refreshCookie },
+    });
+    expect(loser.statusCode).toBe(200);
+    const thirdCookie = extractRefreshCookie(loser.headers);
+
+    // Neither rotation revoked the family: both live cookies still work.
+    const withSecond = await ctx.app.inject({
+      method: "POST",
+      url: "/api/v1/auth/refresh",
+      headers: { cookie: secondCookie },
+    });
+    expect(withSecond.statusCode).toBe(200);
+    const withThird = await ctx.app.inject({
+      method: "POST",
+      url: "/api/v1/auth/refresh",
+      headers: { cookie: thirdCookie },
+    });
+    expect(withThird.statusCode).toBe(200);
+  });
+
+  it("still revokes the family for reuse outside the grace window", async () => {
+    const user = await registerUser(ctx, "reuser");
+    const first = await ctx.app.inject({
+      method: "POST",
+      url: "/api/v1/auth/refresh",
+      headers: { cookie: user.refreshCookie },
+    });
+    expect(first.statusCode).toBe(200);
+    const secondCookie = extractRefreshCookie(first.headers);
+
+    // Age the revocation past REFRESH_REUSE_GRACE_MS (theft signal, not a race).
+    await ctx.db.db.execute(
+      sql`UPDATE refresh_tokens SET revoked_at = now() - interval '10 minutes' WHERE revoked_at IS NOT NULL`,
+    );
+
     const reuse = await ctx.app.inject({
       method: "POST",
       url: "/api/v1/auth/refresh",
@@ -158,13 +212,41 @@ describeIf("auth flow", () => {
     });
     expect(reuse.statusCode).toBe(401);
 
-    // Reuse revokes the whole family, so the rotated cookie dies too.
+    // Reuse outside the grace window kills the whole family.
     const afterTheft = await ctx.app.inject({
       method: "POST",
       url: "/api/v1/auth/refresh",
       headers: { cookie: secondCookie },
     });
     expect(afterTheft.statusCode).toBe(401);
+  });
+
+  it("handles two refreshes with the same cookie without killing the session", async () => {
+    const user = await registerUser(ctx, "racer");
+    const [a, b] = await Promise.all([
+      ctx.app.inject({
+        method: "POST",
+        url: "/api/v1/auth/refresh",
+        headers: { cookie: user.refreshCookie },
+      }),
+      ctx.app.inject({
+        method: "POST",
+        url: "/api/v1/auth/refresh",
+        headers: { cookie: user.refreshCookie },
+      }),
+    ]);
+    expect(a.statusCode).toBe(200);
+    expect(b.statusCode).toBe(200);
+
+    // Both issued tokens belong to a family that still works.
+    for (const cookie of [extractRefreshCookie(a.headers), extractRefreshCookie(b.headers)]) {
+      const next = await ctx.app.inject({
+        method: "POST",
+        url: "/api/v1/auth/refresh",
+        headers: { cookie },
+      });
+      expect(next.statusCode).toBe(200);
+    }
   });
 
   it("logs out and kills the session family", async () => {

@@ -23,6 +23,13 @@ files:
   - "node_modules/uiohook-napi/package.json"
   - "node_modules/uiohook-napi/prebuilds/**"
   - "node_modules/node-gyp-build/**"
+extraResources:
+  # The tray icon MUST be a real file outside the asar (nativeImage loads it
+  # from disk at runtime) and the `files:` allowlist above never shipped
+  # assets/ — the packaged app then created no tray icon at all while
+  # minimize-to-tray still hid the window (reported: app disappears entirely).
+  - from: assets
+    to: assets
 extraMetadata:
   main: dist/main.js
 directories:

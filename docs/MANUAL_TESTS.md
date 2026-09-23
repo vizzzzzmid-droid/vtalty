@@ -146,3 +146,17 @@ assertions are manual-only.
       = the package version.
       (The AppUserModelID is `shop.kirskiy.vitality` — same as `appId`, the
       value electron-builder stamps on the shortcuts it creates.)
+- [ ] Tray regression (packaged Windows build): with "Minimize to tray" ON,
+      minimize the window → a **visible** vitality icon appears in the
+      notification area (check the overflow chevron too) → left-click it
+      restores the window, right-click → Show / Change server / Quit. The
+      window must never vanish without either a taskbar entry or that tray
+      icon. With the setting OFF, minimize keeps a normal taskbar entry and
+      close quits. Quit from the tray leaves no ghost icon behind.
+- [ ] Session persistence (aggressive re-auth regression): use the app
+      actively for well over 15 minutes (access TTL) — including actions
+      right after leaving the app backgrounded for a few minutes and after a
+      long-idle WS reconnect — and confirm you are never returned to the auth
+      screen. Two tabs open simultaneously: neither tab kicks the other out
+      when both refresh at once. A brief server restart/network drop must NOT
+      log you out (a hard 401/403 on refresh still does).

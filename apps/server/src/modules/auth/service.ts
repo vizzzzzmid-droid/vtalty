@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { count, eq, sql } from "drizzle-orm";
+import { and, count, eq, gt, isNull, sql } from "drizzle-orm";
 import type { LoginBody, RegisterBody, User } from "@vitality/shared";
 import type { Db, DbOrTx } from "../../db/client.js";
 import {
@@ -192,6 +192,41 @@ export async function login(
   return { user: toSafeUser(user), tokens };
 }
 
+/**
+ * How long a just-rotated refresh token is still accepted.
+ *
+ * Parallel tabs and 401 bursts (access TTL is 900s: resuming a backgrounded
+ * app, a long-idle WS reconnect, a settings sync + queries firing together)
+ * send the PRE-rotation cookie before the winner's `Set-Cookie` lands. Without
+ * a grace window the loser looked like token theft: the whole family was
+ * revoked and actively-logged-in users were bounced to the auth screen
+ * (previously accepted as risk A5; reported as a real bug).
+ *
+ * Within the window, reuse is tolerated only while the family still holds a
+ * live token. Reuse outside the window — or of an older generation once the
+ * family is drained — still kills the family.
+ */
+export const REFRESH_REUSE_GRACE_MS = 15_000;
+
+async function authResultWithFreshTokens(
+  db: Db,
+  env: Env,
+  userId: string,
+  tokens: SessionTokens,
+): Promise<AuthResult> {
+  void env;
+  const userRows = await db
+    .select()
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  const user = userRows[0];
+  if (user === undefined) {
+    throw unauthorized("User no longer exists");
+  }
+  return { user: toSafeUser(user), tokens };
+}
+
 export async function refresh(
   db: Db,
   env: Env,
@@ -207,14 +242,38 @@ export async function refresh(
   if (row === undefined) {
     throw unauthorized("Invalid refresh token");
   }
-  if (row.revokedAt !== null || row.expiresAt.getTime() <= Date.now()) {
-    if (row.revokedAt !== null) {
-      // Reuse of a rotated token: revoke the whole family (possible theft).
-      await db
-        .delete(refreshTokens)
-        .where(eq(refreshTokens.familyId, row.familyId));
-      throw unauthorized("Session was revoked");
+  if (row.revokedAt !== null) {
+    const reusedWithinGrace =
+      row.revokedAt.getTime() + REFRESH_REUSE_GRACE_MS > Date.now();
+    if (reusedWithinGrace) {
+      const liveRows = await db
+        .select({ id: refreshTokens.id })
+        .from(refreshTokens)
+        .where(
+          and(
+            eq(refreshTokens.familyId, row.familyId),
+            isNull(refreshTokens.revokedAt),
+            gt(refreshTokens.expiresAt, new Date()),
+          ),
+        )
+        .limit(1);
+      if (liveRows.length > 0) {
+        // Legit concurrent rotation: keep the family alive and hand this
+        // caller a token in the same family (never revoke here).
+        const tokens = await db.transaction((tx) =>
+          issueSession(tx, env, row.userId, row.familyId),
+        );
+        return authResultWithFreshTokens(db, env, row.userId, tokens);
+      }
     }
+    // Genuine reuse (outside the grace window, or no live token left):
+    // revoke the whole family (possible theft).
+    await db
+      .delete(refreshTokens)
+      .where(eq(refreshTokens.familyId, row.familyId));
+    throw unauthorized("Session was revoked");
+  }
+  if (row.expiresAt.getTime() <= Date.now()) {
     await db.delete(refreshTokens).where(eq(refreshTokens.id, row.id));
     throw unauthorized("Refresh token expired");
   }
@@ -225,16 +284,7 @@ export async function refresh(
       .where(eq(refreshTokens.id, row.id));
     return issueSession(tx, env, row.userId, row.familyId);
   });
-  const userRows = await db
-    .select()
-    .from(users)
-    .where(eq(users.id, row.userId))
-    .limit(1);
-  const user = userRows[0];
-  if (user === undefined) {
-    throw unauthorized("User no longer exists");
-  }
-  return { user: toSafeUser(user), tokens };
+  return authResultWithFreshTokens(db, env, row.userId, tokens);
 }
 
 export async function logout(db: Db, rawToken: string | null): Promise<void> {

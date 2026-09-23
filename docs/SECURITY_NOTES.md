@@ -82,8 +82,17 @@ remotely; a compromised/malicious server origin is in scope.
   (low at this scale; the box sits behind Caddy on a private VPS).
 - **A4** Category-delete emptiness check is not atomic with the delete
   (low; worst case is an FK error, never silent corruption).
-- **A5** Parallel refresh requests race: only the first rotation wins, the
-  losers must log in again (low; documented in `apps/web/src/api/http.ts`).
+- **A5** (superseded by the refresh fixes, kept for history) Parallel refresh
+  requests used to race: only the first rotation won, the losers were treated
+  as theft, the whole token family was revoked and active users were bounced
+  to the auth screen. Now: the web client coalesces concurrent 401s into a
+  single in-flight refresh (`apps/web/src/api/refresh.ts`), the server accepts
+  reuse of a *just-rotated* token inside a 15 s grace window while the family
+  still holds a live token (`REFRESH_REUSE_GRACE_MS` in
+  `apps/server/src/modules/auth/service.ts`), and transient refresh failures
+  (network/5xx) no longer log the user out. Residual risk accepted: a stolen
+  token used within 15 s of rotation also gets a fresh token (bounded by the
+  window; reuse outside it still kills the family).
 - **A6** Caddy log filter, admin `:2019` healthcheck and localhost HTTPS are
   unverified on this dev machine (no Docker); covered by the CI
   `compose-smoke` job and must be re-verified on the Ubuntu VPS.

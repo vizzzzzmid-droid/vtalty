@@ -57,6 +57,14 @@ URL **remotely** (same-origin web client) after a `/api/v1/health` check.
   accelerator is editable too (modifier required, OS-reserved combos
   rejected, conflict-checked against the PTT key). Key changes apply after
   restart.
+- Tray: icon loaded from the real file shipped via `extraResources`
+  (`<resources>/assets/icon.png`; dev runs use the project dir), with an
+  embedded fallback PNG if the file is unreadable. Minimize/close only hide
+  the window when `minimizeToTray` is ON **and** a tray icon actually exists
+  (`shouldHideToTray`, unit-tested) — otherwise the window minimizes/closes
+  normally instead of becoming unreachable (regression: packaged builds used
+  to create no tray icon at all while hiding the window on every minimize).
+  `before-quit` destroys the tray icon so Windows doesn't keep a ghost entry.
 - Platform limits: global PTT needs `uiohook-napi` — no hook on
   Wayland-without-permission, macOS-without-Input-Monitoring approval, or
   missing prebuilds (in-app tab-focused PTT remains the fallback);

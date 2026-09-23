@@ -19,6 +19,13 @@ import {
 import { loadSettings, saveSettings } from "./store.js";
 import { openExternalSafe, registerIpc } from "./ipc.js";
 import { APP_ID } from "./identity.js";
+import { existsSync } from "node:fs";
+import {
+  FALLBACK_TRAY_PNG_BASE64,
+  pickTrayIconPath,
+  shouldHideToTray,
+  trayIconCandidates,
+} from "./tray.js";
 
 // Compiled CJS layout: __dirname is dist/, one level below the app root.
 const ROOT = path.resolve(__dirname, "..");
@@ -40,6 +47,8 @@ if (process.platform === "win32") {
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
+/** True only after a tray icon actually exists — gate for hiding the window. */
+let trayReady = false;
 let instanceOrigin = "";
 
 function preloadPath(): string {
@@ -237,12 +246,15 @@ function createWindow(startMinimized: boolean): void {
   );
 
   window.on("minimize", () => {
-    if (loadSettings().minimizeToTray) {
+    // Only hide when the setting is on AND a tray icon really exists;
+    // otherwise minimize normally so the window stays reachable on the
+    // taskbar (regression: hidden window with no tray = "app disappeared").
+    if (shouldHideToTray(loadSettings().minimizeToTray, trayReady)) {
       window.hide();
     }
   });
   window.on("close", (event) => {
-    if (!quitting && loadSettings().minimizeToTray) {
+    if (!quitting && shouldHideToTray(loadSettings().minimizeToTray, trayReady)) {
       event.preventDefault();
       window.hide();
       return;
@@ -269,48 +281,73 @@ function createWindow(startMinimized: boolean): void {
 }
 
 function setupTray(): void {
-  const iconPath = path.join(ROOT, "assets", "icon.png");
-  let image = nativeImage.createFromPath(iconPath);
-  if (image.isEmpty()) {
-    return;
-  }
-  image = image.resize({ width: 16, height: 16 });
-  tray = new Tray(image);
-  tray.setToolTip("vitality");
-  const menu = Menu.buildFromTemplate([
-    {
-      label: "Show",
-      click: () => {
-        mainWindow?.show();
-      },
-    },
-    {
-      label: "Change server…",
-      click: () => {
-        mainWindow?.show();
-        showConnectScreen();
-      },
-    },
-    { type: "separator" },
-    {
-      label: "Quit",
-      click: () => {
-        quitting = true;
-        app.quit();
-      },
-    },
-  ]);
-  tray.setContextMenu(menu);
-  tray.on("click", () => {
-    if (mainWindow === null || mainWindow.isDestroyed()) {
+  trayReady = false;
+  try {
+    // Packaged: extraResources ships assets/ as a real file next to the asar;
+    // dev: the project dir sits one level above dist/ (see src/tray.ts).
+    const picked = pickTrayIconPath(
+      trayIconCandidates(process.resourcesPath, ROOT),
+      existsSync,
+    );
+    let image =
+      picked !== null ? nativeImage.createFromPath(picked) : nativeImage.createEmpty();
+    if (image.isEmpty()) {
+      // Last-resort embedded icon: a visible tray beats a perfect one — an
+      // invisible/absent tray with a hidden window strands the user.
+      image = nativeImage.createFromDataURL(
+        `data:image/png;base64,${FALLBACK_TRAY_PNG_BASE64}`,
+      );
+    }
+    if (image.isEmpty()) {
+      console.error(
+        "[desktop] no tray icon available — minimize-to-tray stays off for this run",
+      );
       return;
     }
-    if (mainWindow.isVisible()) {
-      mainWindow.hide();
-    } else {
-      mainWindow.show();
-    }
-  });
+    image = image.resize({ width: 16, height: 16 });
+    tray = new Tray(image);
+    tray.setToolTip("vitality");
+    const menu = Menu.buildFromTemplate([
+      {
+        label: "Show",
+        click: () => {
+          mainWindow?.show();
+        },
+      },
+      {
+        label: "Change server…",
+        click: () => {
+          mainWindow?.show();
+          showConnectScreen();
+        },
+      },
+      { type: "separator" },
+      {
+        label: "Quit",
+        click: () => {
+          quitting = true;
+          app.quit();
+        },
+      },
+    ]);
+    tray.setContextMenu(menu);
+    tray.on("click", () => {
+      if (mainWindow === null || mainWindow.isDestroyed()) {
+        return;
+      }
+      if (mainWindow.isVisible()) {
+        mainWindow.hide();
+      } else {
+        mainWindow.show();
+      }
+    });
+    // Only now may window handlers hide the window into this tray.
+    trayReady = !tray.isDestroyed();
+  } catch (error) {
+    tray = null;
+    trayReady = false;
+    console.error("[desktop] tray setup failed, minimize-to-tray disabled:", error);
+  }
 }
 
 async function bootstrap(): Promise<void> {
@@ -379,6 +416,13 @@ async function bootstrap(): Promise<void> {
     quitting = true;
     stopGlobalPtt();
     unregisterShortcuts();
+    trayReady = false;
+    // Remove the notification-area icon explicitly so no ghost icon is left
+    // behind in the Windows tray after quit.
+    if (tray !== null && !tray.isDestroyed()) {
+      tray.destroy();
+    }
+    tray = null;
     if (mainWindow !== null && !mainWindow.isDestroyed()) {
       persistWindowState(mainWindow);
     }

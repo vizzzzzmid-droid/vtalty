@@ -22,14 +22,18 @@
   `docs/ROADMAP.md`. Manual voice test checklist: `docs/MANUAL_TESTS.md`
   (from Phase 4).
 - Current phase: **Phase 6b — DONE (all 3 steps committed) + Windows
-  AppUserModelID/metadata fix**. Desktop workflow green on main (NSIS +
-  AppImage, Electron smoke in CI, installer contents inspected); the fix
-  declares the explicit AUMID = `appId` before any UI and aligns
-  productName/executableName (details in §7, manual Task Manager check in
-  docs/MANUAL_TESTS.md). `ci` workflow still red on pre-existing server/web
-  failures (integration data assertions, e2e app asserts, smoke LiveKit
-  502) — documented below, out of desktop scope, not reproducible on this
-  box (no Docker/PG). STOP after reporting, wait for "continue".
+  AppUserModelID/metadata fix + post-6b bugfixes (tray disappearance,
+  aggressive re-auth)**. Desktop workflow green on main (NSIS + AppImage,
+  Electron smoke in CI, installer contents inspected); the AUMID fix declares
+  the explicit AUMID = `appId` before any UI and aligns
+  productName/executableName; the tray fix ships `assets/` via
+  `extraResources` + a `trayReady` hide-gate; the refresh fix adds a 15 s
+  rotation-grace window server-side and single-flight/classified refresh
+  client-side (details in §7, manual checks in docs/MANUAL_TESTS.md).
+  `ci` workflow still red on pre-existing server/web failures (integration
+  data assertions, e2e app asserts, smoke LiveKit 502) — documented below, out
+  of desktop scope, not reproducible on this box (no Docker/PG). STOP after
+  reporting, wait for "continue".
 - Repo root moved to `vitality/` (clean dir; parent `Default Project` holds
   unrelated files). All paths below are relative to `vitality/`.
 - Local toolchain (this Windows machine): Node 24.19 + pnpm 9.15.0 via
@@ -286,6 +290,43 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   (`@electron/rebuild` needs MSVC, absent on this box) and the Task Manager
   visual — manual rows added to `docs/MANUAL_TESTS.md`; the CI desktop rebuild
   is the packaging check.
+- [x] Post-6b bugfix — tray disappearance (Windows) + aggressive re-auth.
+  **1. Minimize lost the app entirely.** Root cause (verified against the
+  installed electron-builder source): the `files:` allowlist in
+  `electron-builder.yml` never shipped `assets/` (positive user patterns
+  replace electron-builder's default `**/*`, see `fileMatcher.js:117-125`), so
+  `nativeImage.createFromPath(<asar>/assets/icon.png)` produced an empty image,
+  `setupTray()` returned early and no tray icon existed — while `minimize`/
+  `close` still hid the window (`minimizeToTray` defaults to true): no window,
+  no taskbar entry, no tray. Fix: ship the icon via `extraResources` (real file
+  at `<resources>/assets/icon.png`, outside the asar), embedded fallback PNG,
+  `shouldHideToTray(setting, trayReady)` gate so the window is never hidden
+  without a tray (all in new `src/tray.ts`, pure/unit-tested), and
+  `tray.destroy()` on `before-quit`. Tray API usage checked against the
+  installed `electron.d.ts` (`Tray` ctor/`setImage`/`setToolTip`/
+  `setContextMenu`/`destroy`).
+  **2. Sessions killed during active use.** Three converging defects (the old
+  accepted risk A5 now reported as a real bug): (a) `refresh()` treated reuse
+  of a just-rotated cookie as theft and **revoked the whole family**, so the
+  parallel-401 burst that follows every 900 s access-TTL expiry (backgrounded
+  resume, long-idle WS reconnect + settings sync) logged active users out;
+  (b) the web client ran one refresh per 401 with no coalescing; (c) ANY
+  refresh failure — including network blips and 5xx — called `applyGuest()`.
+  Fix: server grace window `REFRESH_REUSE_GRACE_MS = 15_000` (reuse tolerated
+  only while the family still has a live token; outside the window or drained
+  → family still revoked as before), client `api/refresh.ts` with
+  single-flight + failure classification (only explicit 401/403 ends the
+  session). Tests: server `tests/integration/auth.test.ts` rewritten (rotation,
+  grace reuse keeps family alive, theft outside grace via SQL-aged
+  `revoked_at`, two concurrent same-cookie refreshes) — 9/9 auth and full
+  integration 56/56 green locally on PG 17; web `tests/refresh.test.ts`
+  (16 cases: classification, malformed bodies, network/5xx keep-session,
+  single-flight collapse); desktop `tests/tray.test.ts` (11 cases incl. the
+  yml `extraResources` guard). Verified locally: web 54 + desktop 69 + server
+  50 unit, all lint/typecheck clean, Electron smoke 6/6, `pnpm build`.
+  NOT verified locally: the visual tray icon and >15 min session survival on a
+  packaged Windows build (manual rows added to `docs/MANUAL_TESTS.md`); CI
+  rebuild + artifact inspection is the packaging check.
 
 ## 8. Known issues / risks
 
