@@ -257,10 +257,15 @@ export function attachStreamAudio(
   identity: string,
   element: HTMLAudioElement,
 ): () => void {
+  installAudioUnlockListeners();
+  liveAudioElements.add(element);
+  resumeStreamAudioContext();
   const pub = publicationsOf(identity)?.audio;
   const track = pub?.track;
   if (track === undefined || track === null) {
-    return () => undefined;
+    return () => {
+      liveAudioElements.delete(element);
+    };
   }
   if (element.srcObject === null) {
     // Always upmix to stereo to ensure centered audio playback.
@@ -268,20 +273,26 @@ export function attachStreamAudio(
     // and stereo tracks (which pass through unchanged via the merger).
     const mediaStreamTrack = track.mediaStreamTrack;
     if (mediaStreamTrack !== null && mediaStreamTrack !== undefined) {
-      element.srcObject = upmixToStereo(mediaStreamTrack);
+      const upmixed = upmixToStereo(mediaStreamTrack);
+      if (upmixed !== null) {
+        element.srcObject = upmixed;
+      } else {
+        track.attach(element);
+      }
     } else {
       // Fallback: attach directly if we can't access the underlying track.
       // In this case, we use the track's attach method which handles cleanup.
       track.attach(element);
     }
-    // Ensure the audio element plays (autoplay may be blocked without user gesture).
-    try {
-      element.play().catch(() => undefined);
-    } catch {
-      // Autoplay blocked; the existing "click to enable audio" banner handles this.
-    }
+    tryPlay(element);
+  } else if (element.paused) {
+    // An earlier play() may have been rejected by autoplay policy; retry on
+    // every attach tick (a real unlock happens on the next user gesture via
+    // installAudioUnlockListeners).
+    tryPlay(element);
   }
   return () => {
+    liveAudioElements.delete(element);
     try {
       // For upmixed tracks, we have a MediaStream that we need to clean up.
       const currentSrc = element.srcObject;
@@ -311,23 +322,71 @@ export function attachStreamAudio(
  * If mono, both output channels receive the same signal (centered playback).
  */
 function upmixToStereo(track: MediaStreamTrack): MediaStream | null {
-  // Use a shared AudioContext for the upmix operation.
-  let ctx = sharedContext;
-  if (ctx === null) {
-    ctx = new AudioContext({ sampleRate: 48000 });
-    sharedContext = ctx;
+  try {
+    // Use a shared AudioContext for the upmix operation.
+    let ctx = sharedContext;
+    if (ctx === null) {
+      ctx = new AudioContext({ sampleRate: 48000 });
+      sharedContext = ctx;
+    }
+    resumeStreamAudioContext();
+    // Wrap the track in a MediaStream for createMediaStreamSource.
+    const stream = new MediaStream([track]);
+    const source = ctx.createMediaStreamSource(stream);
+    const merger = ctx.createChannelMerger(2);
+    source.connect(merger);
+    const dest = ctx.createMediaStreamDestination();
+    merger.connect(dest);
+    return dest.stream;
+  } catch {
+    return null;
   }
-  // Wrap the track in a MediaStream for createMediaStreamSource.
-  const stream = new MediaStream([track]);
-  const source = ctx.createMediaStreamSource(stream);
-  const merger = ctx.createChannelMerger(2);
-  source.connect(merger);
-  const dest = ctx.createMediaStreamDestination();
-  merger.connect(dest);
-  return dest.stream;
 }
 
 let sharedContext: AudioContext | null = null;
+
+/**
+ * Chromium/Electron start an AudioContext created outside a user gesture in
+ * the "suspended" state — its MediaStreamDestination then carries silence
+ * even though the attached <audio> element reports as playing. The voice
+ * path surfaces this via the "click to enable audio" banner, but stream
+ * tiles are excluded from it (they own their elements), so they self-unlock:
+ * resume the shared upmix context and re-play paused stream elements on the
+ * first pointer/key gesture anywhere in the document.
+ */
+const liveAudioElements = new Set<HTMLAudioElement>();
+let unlockListenersInstalled = false;
+
+function resumeStreamAudioContext(): void {
+  if (sharedContext !== null && sharedContext.state === "suspended") {
+    void sharedContext.resume();
+  }
+}
+
+function tryPlay(element: HTMLAudioElement): void {
+  try {
+    element.play().catch(() => undefined);
+  } catch {
+    // Autoplay blocked; the gesture listener retries on the next interaction.
+  }
+}
+
+function installAudioUnlockListeners(): void {
+  if (unlockListenersInstalled || typeof document === "undefined") {
+    return;
+  }
+  unlockListenersInstalled = true;
+  const unlock = (): void => {
+    resumeStreamAudioContext();
+    for (const element of liveAudioElements) {
+      if (element.paused) {
+        tryPlay(element);
+      }
+    }
+  };
+  document.addEventListener("pointerdown", unlock);
+  document.addEventListener("keydown", unlock);
+}
 
 /** Live connection quality of a sharer (for the "degraded" hint). */
 export function sharerQuality(identity: string): string | null {

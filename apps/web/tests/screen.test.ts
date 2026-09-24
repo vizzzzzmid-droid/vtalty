@@ -1,5 +1,14 @@
 // @vitest-environment happy-dom
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+
+// happy-dom rewrites import.meta.url to an http: URL, so resolve from the
+// package cwd (vitest runs with cwd = apps/web).
+const tileSource = readFileSync(
+  resolve(process.cwd(), "src/components/StreamTile.tsx"),
+  "utf8",
+);
 
 describe("noise suppression mono-to-stereo upmix", () => {
   it("RNNoiseWorkletNode uses maxChannels: 1 (mono processing)", () => {
@@ -65,19 +74,35 @@ describe("screen share audio attachment", () => {
   });
 });
 
-describe("fullscreen request target", () => {
-  it("video element is preferred for fullscreen request over container div", () => {
-    // In production code, fullscreen is requested on the video element first
-    // (StreamTile.tsx line ~190), falling back to container div if video fails.
-    // This is because some browsers/Electron require the media element for
-    // fullscreen to work properly.
-    //
-    // This test documents the design decision; the actual implementation
-    // is in StreamTile.tsx where videoRef.current?.requestFullscreen() is
-    // called before falling back to boxRef.current?.requestFullscreen().
-    //
-    // happy-dom doesn't implement requestFullscreen, so we verify the
-    // logic through code documentation rather than runtime test.
-    expect(true).toBe(true);
+describe("fullscreen overlay", () => {
+  it("StreamTile never uses the native Fullscreen API", () => {
+    // Native requestFullscreen() shows generic OS/browser chrome and is
+    // broken in the Electron desktop client; fullscreen is a custom in-app
+    // overlay (a fixed full-viewport portal) instead.
+    expect(tileSource).not.toContain("requestFullscreen");
+    expect(tileSource).not.toContain("exitFullscreen");
+  });
+
+  it("fullscreen overlay is a portal with custom controls", () => {
+    expect(tileSource).toContain("createPortal");
+    expect(tileSource).toContain("fixed inset-0 z-50");
+    // Always-visible close button.
+    expect(tileSource).toContain('aria-label="Close fullscreen"');
+    // Live indicator + sharer identity + volume control.
+    expect(tileSource).toContain("LIVE");
+    expect(tileSource).toContain("Avatar");
+    expect(tileSource).toContain('aria-label="Stream volume"');
+  });
+});
+
+describe("stream audio element", () => {
+  it("audio element is visually hidden but NOT display:none", () => {
+    // Chromium suspends media in display:none subtrees (same convention as
+    // remoteAudio.ts); the stream audio element must stay in the render tree.
+    const audioTag = tileSource
+      .split("\n")
+      .find((line) => line.trimStart().startsWith("<audio"));
+    expect(audioTag).toBeDefined();
+    expect(audioTag).not.toContain('className="hidden"');
   });
 });

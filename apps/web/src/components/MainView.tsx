@@ -1,11 +1,11 @@
-import { useState } from "react";
-import { Volume2 } from "lucide-react";
 import type { Channel, ServerState } from "@vitality/shared";
+import { Volume2 } from "lucide-react";
 import { displayNameOf } from "../lib/format.js";
 import { StreamTile } from "./StreamTile.js";
 
-// Voice channel view: active stream tiles (opt-in watching) or an
-// explanatory empty state. Text channels render ChatView (see App shell).
+// Voice channel view: screen-share cards in a responsive grid (opt-in
+// watching) or an explanatory empty state. Text channels render ChatView
+// (see App shell).
 export function MainView({
   channel,
   state,
@@ -13,8 +13,6 @@ export function MainView({
   channel: Channel | null;
   state: ServerState | null;
 }): React.JSX.Element {
-  const [theater, setTheater] = useState<string | null>(null);
-
   if (channel === null) {
     return (
       <div className="flex flex-1 items-center justify-center [background-color:var(--surface-3)]">
@@ -31,7 +29,6 @@ export function MainView({
     (participant) => participant.sharingScreen,
   );
   const byId = new Map((state?.members ?? []).map((member) => [member.userId, member]));
-  const theaterSharer = sharers.find((entry) => entry.userId === theater) ?? null;
 
   return (
     <div className="flex min-w-0 flex-1 flex-col [background-color:var(--surface-3)]">
@@ -48,36 +45,25 @@ export function MainView({
           </span>
         ) : null}
       </header>
-      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3">
-        {theaterSharer !== null ? (
-          <StreamTile
-            sharerId={theaterSharer.userId}
-            sharerName={sharerDisplayName(byId, theaterSharer.userId)}
-            theater
-            onTheater={setTheater}
-          />
-        ) : null}
-        {sharers.length === 0 ? (
-          <div className="flex flex-1 items-center justify-center px-6">
-            <p className="max-w-md text-center text-sm [color:var(--text-muted)]">
-              No one is sharing right now. Click a voice channel to join it,
-              then use the screen button in the bottom-left panel.
-            </p>
-          </div>
-        ) : (
-          sharers
-            .filter((entry) => entry.userId !== theater)
-            .map((entry) => (
-              <StreamTile
-                key={entry.userId}
-                sharerId={entry.userId}
-                sharerName={sharerDisplayName(byId, entry.userId)}
-                theater={false}
-                onTheater={setTheater}
-              />
-            ))
-        )}
-      </div>
+      {sharers.length === 0 ? (
+        <div className="flex min-h-0 flex-1 items-center justify-center px-6">
+          <p className="max-w-md text-center text-sm [color:var(--text-muted)]">
+            No one is sharing right now. Click a voice channel to join it,
+            then use the screen button in the bottom-left panel.
+          </p>
+        </div>
+      ) : (
+        <div className="grid min-h-0 flex-1 content-start gap-3 overflow-y-auto p-3 grid-cols-[repeat(auto-fill,minmax(320px,1fr))]">
+          {sharers.map((entry) => (
+            <StreamTile
+              key={entry.userId}
+              sharerId={entry.userId}
+              sharerName={sharerDisplayName(byId, entry.userId)}
+              sharerAvatarUrl={byId.get(entry.userId)?.user.avatarUrl ?? null}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
