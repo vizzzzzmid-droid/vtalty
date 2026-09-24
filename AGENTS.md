@@ -36,7 +36,7 @@
   fullscreen overlay (native Fullscreen API removed), and the silent
   screen-share audio root cause is fixed (visually-hidden audio element
   instead of `display:none` + suspended upmix AudioContext resume +
-  gesture unlock). STOP after reporting, wait for "continue".
+  gesture unlock). Follow-up fix (3c55680): audio played LEFT-EAR-ONLY in one ear - a ChannelMergerNode maps input N to output channel N and bare `connect(merger)` fed input 0 (left) only; both upmix sites (screen.ts, chain.ts) now feed BOTH inputs, stereo sources keep L/R via ChannelSplitter, and chain.ts's dead mono detection (`gain.channelCount === 1` is never true) now reads the track's `getSettings().channelCount`; all TEMP-DEBUG(screen-audio) logging removed. STOP after reporting, wait for "continue".
 - Repo root moved to `vitality/` (clean dir; parent `Default Project` holds
   unrelated files). All paths below are relative to `vitality/`.
 - Local toolchain (this Windows machine): Node 24.19 + pnpm 9.15.0 via
@@ -359,7 +359,27 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   Verified locally: typecheck/lint clean, web 62/62 unit, `vite build`;
   CI `ci` + `desktop` green (runs 35976612008/35976612056). Live two-client
   audio/overlay check stays manual (docs/MANUAL_TESTS.md).
-
+- [x] Post-6b bugfix - stream/mic audio LEFT-EAR-ONLY (commit 3c55680).
+  TEMP-DEBUG(screen-audio) instrumentation (dfc91e1) proved playback healthy
+  (AudioContext `running`, srcObject set, unlock gestures firing, `play()`
+  resolved) - the remaining defect was stereo CENTERING. Root cause: a
+  ChannelMergerNode maps input N to output channel N, and both upmix sites
+  used a bare `connect(merger)`, landing the source on input 0 (left) only:
+  (a) `screen.ts upmixToStereo` - mono sources now feed BOTH inputs
+  (`connect(merger, 0, 0)` + `connect(merger, 0, 1)`), and genuine stereo
+  sources keep L/R via ChannelSplitter(2) -> merger 0->0/1->1 (a bare merger
+  input would down-mix stereo to mono); (b) `chain.ts buildMicChain` - same
+  dual-input fix, plus its mono DETECTION was dead code
+  (`gain.channelCount === 1` is never true: GainNode channelCount defaults
+  to 2 with mode "max"), so mono is now detected from the mic track
+  `getSettings().channelCount` (enhanced mode is always mono via RNNoise).
+  All TEMP-DEBUG(screen-audio) logging removed (screen.ts, StreamTile.tsx).
+  Regression tests (tests/screen.test.ts, source-level): dual-input wiring
+  in both files, splitter wiring, no bare `connect(merger);` statement, no
+  GainNode.channelCount mono check, no TEMP-DEBUG leftovers. Verified
+  locally: typecheck/lint clean, web 67 unit green, `vite build`; CI `ci` +
+  `desktop` green (runs 35981495885/35981495849). Live two-ear check stays
+  manual (docs/MANUAL_TESTS.md: centred mic + centred stream audio rows).
 
 ## 8. Known issues / risks
 
@@ -414,7 +434,7 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   covered by `docs/MANUAL_TESTS.md`. The CI `e2e-voice` job is
   `continue-on-error` (experimental) until it proves green.
 - `ci` + `desktop` workflows GREEN on main (runs 35976612008/35976612056,
-  2026-09-24, latest: c557a5b screen-share viewing fix):
+  2026-09-24, latest: 3c55680 stereo-centering fix, runs 35981495885/35981495849):
   lint-typecheck-unit-build, integration (51/51), compose, e2e (3/3),
   stack-smoke full pass incl. native RTC join/publish/presence,
   backup/restore and restart-reconcile, NSIS + AppImage + Electron smoke.
