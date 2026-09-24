@@ -45,6 +45,7 @@ function playbackContext(): AudioContext | null {
   if (sharedContext.state === "suspended") {
     void sharedContext.resume();
   }
+  console.info("[vol-debug] boost ctx state:", sharedContext.state);
   return sharedContext;
 }
 
@@ -75,17 +76,23 @@ export function applyElementVolume(element: HTMLMediaElement, volume: number): v
   const existing = boosts.get(element);
   if (existing !== undefined) {
     existing.gain.gain.value = clamped;
+    console.info(
+      "[vol-debug] boost: existing gain =", clamped,
+      "ctx.state:", existing.gain.context.state,
+    );
     return;
   }
   if (clamped <= 1) {
     // Native path: never-boosted elements need no AudioContext at all.
     element.volume = clamped;
+    console.info("[vol-debug] boost: native element.volume =", clamped);
     return;
   }
   const ctx = playbackContext();
   if (ctx === null) {
     // No WebAudio available: fall back to full native volume (100%).
     element.volume = 1;
+    console.info("[vol-debug] boost: NO AudioContext -> fallback element.volume = 1");
     return;
   }
   try {
@@ -97,8 +104,16 @@ export function applyElementVolume(element: HTMLMediaElement, volume: number): v
     boosts.set(element, { source, gain });
     // The GainNode carries the volume from now on.
     element.volume = 1;
-  } catch {
+    console.info(
+      "[vol-debug] boost: CREATED gain =", clamped,
+      "ctx.state:", ctx.state,
+      "srcObject:", element.srcObject !== null,
+      "paused:", element.paused,
+      "muted:", element.muted,
+    );
+  } catch (err) {
     element.volume = 1;
+    console.info("[vol-debug] boost: createMediaElementSource FAILED:", err);
   }
 }
 
