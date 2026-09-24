@@ -1,4 +1,5 @@
 import type { Track } from "livekit-client";
+import { applyElementVolume, releaseElementVolume } from "./boost.js";
 
 /**
  * Hidden playback sink for remote microphone audio.
@@ -67,6 +68,26 @@ export function attachRemoteAudio(
   return element;
 }
 
+/** Apply the per-user listen volume (0..MAX_VOLUME) to a participant's
+ * hidden elements. ≤100% uses native element.volume; past 100% the element
+ * is rerouted through a WebAudio GainNode (see boost.ts).
+ */
+export function setRemoteAudioVolume(
+  identity: string,
+  volume: number,
+  owner: Document = document,
+): void {
+  const container = owner.getElementById(REMOTE_AUDIO_CONTAINER_ID);
+  if (!(container instanceof HTMLDivElement)) {
+    return;
+  }
+  for (const element of container.querySelectorAll<HTMLAudioElement>("audio")) {
+    if (element.dataset["identity"] === identity) {
+      applyElementVolume(element, volume);
+    }
+  }
+}
+
 /** Detach a track's hidden elements (unsubscribe path). */
 export function detachRemoteAudio(
   track: Track | AttachableAudioTrack,
@@ -85,6 +106,7 @@ export function detachRemoteAudio(
     } catch {
       // Already detached elsewhere.
     }
+    releaseElementVolume(element);
     element.remove();
   }
 }
@@ -99,6 +121,7 @@ export function detachRemoteAudioFor(identity: string, owner: Document = documen
     if (element.dataset["identity"] === identity) {
       element.removeAttribute("src");
       element.srcObject = null;
+      releaseElementVolume(element);
       element.remove();
     }
   }
@@ -106,7 +129,13 @@ export function detachRemoteAudioFor(identity: string, owner: Document = documen
 
 /** Drop the whole sink (leave/teardown path). */
 export function clearRemoteAudio(owner: Document = document): void {
-  owner.getElementById(REMOTE_AUDIO_CONTAINER_ID)?.remove();
+  const container = owner.getElementById(REMOTE_AUDIO_CONTAINER_ID);
+  if (container instanceof HTMLDivElement) {
+    for (const element of container.querySelectorAll<HTMLAudioElement>("audio")) {
+      releaseElementVolume(element);
+    }
+    container.remove();
+  }
 }
 
 /** How many hidden audio elements currently play (diagnostics/tests). */

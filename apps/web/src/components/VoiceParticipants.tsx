@@ -80,13 +80,13 @@ function ParticipantMenu({
         >
           <div className="px-2 py-1.5">
             <label htmlFor={`vol-${participant.userId}`} className="text-xs [color:var(--text-muted)]">
-              Volume — {name}
+              Volume — {name} · {Math.round(volume * 100)}%
             </label>
             <input
               id={`vol-${participant.userId}`}
               type="range"
               min={0}
-              max={100}
+              max={400}
               value={Math.round(volume * 100)}
               onChange={(event) => {
                 const next = Number(event.target.value) / 100;

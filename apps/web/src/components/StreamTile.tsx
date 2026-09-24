@@ -214,7 +214,7 @@ export function StreamTile({
                 aria-label="Stream volume"
                 type="range"
                 min={0}
-                max={100}
+                max={400}
                 value={Math.round(streamVolume * 100)}
                 onChange={(event) => onVolumeChange(Number(event.target.value) / 100)}
                 className="w-20"
@@ -329,7 +329,7 @@ function StreamOverlay({
             aria-label="Stream volume"
             type="range"
             min={0}
-            max={100}
+            max={400}
             value={Math.round(streamVolume * 100)}
             onChange={(event) => onVolumeChange(Number(event.target.value) / 100)}
             className="w-24"

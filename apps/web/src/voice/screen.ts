@@ -4,6 +4,7 @@ import type { ContentHintMode, ScreenPresetId } from "./store.js";
 import { getRoom, setSuppressShareNotice } from "./room.js";
 import { useVoiceConnection } from "./store.js";
 import { useVoiceSettings } from "./settings.js";
+import { applyElementVolume, releaseElementVolume } from "./boost.js";
 
 type LiveKitModule = typeof import("livekit-client");
 
@@ -210,16 +211,14 @@ export async function setStreamQuality(
   video.setVideoQuality(map[quality]);
 }
 
-export async function setStreamVolume(identity: string, volume: number): Promise<void> {
-  const room = getRoom();
-  if (room === null) {
+/** Set a stream's listen volume (0..MAX_VOLUME; >100% boosts via WebAudio gain). */
+export function setStreamVolume(identity: string, volume: number): void {
+  const elements = streamAudioElements.get(identity);
+  if (elements === undefined) {
     return;
   }
-  const sdk = await livekit();
-  for (const participant of room.remoteParticipants.values()) {
-    if (participant.identity === identity) {
-      participant.setVolume(volume, sdk.Track.Source.ScreenShareAudio);
-    }
+  for (const element of elements) {
+    applyElementVolume(element, volume);
   }
 }
 
@@ -258,13 +257,13 @@ export function attachStreamAudio(
   element: HTMLAudioElement,
 ): () => void {
   installAudioUnlockListeners();
-  liveAudioElements.add(element);
+  trackStreamAudioElement(identity, element);
   resumeStreamAudioContext();
   const pub = publicationsOf(identity)?.audio;
   const track = pub?.track;
   if (track === undefined || track === null) {
     return () => {
-      liveAudioElements.delete(element);
+      untrackStreamAudioElement(identity, element);
     };
   }
   if (element.srcObject === null) {
@@ -291,8 +290,12 @@ export function attachStreamAudio(
     // installAudioUnlockListeners).
     tryPlay(element);
   }
+  applyElementVolume(
+    element,
+    useVoiceSettings.getState().streamVolumes[identity] ?? 1,
+  );
   return () => {
-    liveAudioElements.delete(element);
+    untrackStreamAudioElement(identity, element);
     try {
       // For upmixed tracks, we have a MediaStream that we need to clean up.
       const currentSrc = element.srcObject;
@@ -368,6 +371,29 @@ let sharedContext: AudioContext | null = null;
  * first pointer/key gesture anywhere in the document.
  */
 const liveAudioElements = new Set<HTMLAudioElement>();
+/** Stream-tile audio elements keyed by sharer identity (for volume control). */
+const streamAudioElements = new Map<string, Set<HTMLAudioElement>>();
+
+function trackStreamAudioElement(identity: string, element: HTMLAudioElement): void {
+  liveAudioElements.add(element);
+  let set = streamAudioElements.get(identity);
+  if (set === undefined) {
+    set = new Set();
+    streamAudioElements.set(identity, set);
+  }
+  set.add(element);
+}
+
+function untrackStreamAudioElement(identity: string, element: HTMLAudioElement): void {
+  liveAudioElements.delete(element);
+  releaseElementVolume(element);
+  const set = streamAudioElements.get(identity);
+  set?.delete(element);
+  if (set !== undefined && set.size === 0) {
+    streamAudioElements.delete(identity);
+  }
+}
+
 let unlockListenersInstalled = false;
 
 function resumeStreamAudioContext(): void {

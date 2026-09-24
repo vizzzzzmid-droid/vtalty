@@ -1,7 +1,6 @@
 import type {
   ConnectionState,
   Participant,
-  RemoteParticipant,
   RemoteTrackPublication,
   Room,
   RoomEvent,
@@ -19,6 +18,7 @@ import {
   clearRemoteAudio,
   detachRemoteAudio,
   detachRemoteAudioFor,
+  setRemoteAudioVolume,
 } from "./remoteAudio.js";
 import type { VoiceQuality } from "./store.js";
 import { useVoiceConnection } from "./store.js";
@@ -108,20 +108,13 @@ function applyAllVolumes(): void {
   for (const participant of room.remoteParticipants.values()) {
     const volume = volumes[participant.identity];
     if (volume !== undefined) {
-      (participant as RemoteParticipant).setVolume(volume);
+      setRemoteAudioVolume(participant.identity, volume);
     }
   }
 }
 
 export function applyUserVolume(userId: string, volume: number): void {
-  if (room === null) {
-    return;
-  }
-  for (const participant of room.remoteParticipants.values()) {
-    if (participant.identity === userId) {
-      (participant as RemoteParticipant).setVolume(volume);
-    }
-  }
+  setRemoteAudioVolume(userId, volume);
 }
 
 function sampleQuality(): void {
@@ -235,7 +228,7 @@ function attachHandlers(next: Room, LK: LiveKitModule): void {
       }
       const volume = useVoiceSettings.getState().userVolumes[participant.identity];
       if (volume !== undefined && !isScreenAudio) {
-        (participant as RemoteParticipant).setVolume(volume);
+        setRemoteAudioVolume(participant.identity, volume);
       }
     },
   );

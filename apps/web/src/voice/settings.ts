@@ -20,9 +20,9 @@ interface VoiceSettings {
   pttEnabled: boolean;
   /** KeyboardEvent.code for push-to-talk (web: works while tab is focused). */
   pttKey: string;
-  /** Per-user listen volume 0..1, keyed by user id. */
+  /** Per-user listen volume 0..MAX_VOLUME (boost >100%), keyed by user id. */
   userVolumes: Record<string, number>;
-  /** Per-stream (screen audio) volume 0..1, keyed by sharer user id. */
+  /** Per-stream (screen audio) volume 0..MAX_VOLUME (boost >100%), keyed by sharer user id. */
   streamVolumes: Record<string, number>;
   set: (patch: Partial<VoiceSettings>) => void;
   setUserVolume: (userId: string, volume: number) => void;
