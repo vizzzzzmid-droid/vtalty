@@ -79,13 +79,20 @@ export function setRemoteAudioVolume(
 ): void {
   const container = owner.getElementById(REMOTE_AUDIO_CONTAINER_ID);
   if (!(container instanceof HTMLDivElement)) {
+    console.info("[vol-debug] setRemoteAudioVolume: NO CONTAINER", identity, volume);
     return;
   }
+  let matched = 0;
+  const seen: string[] = [];
   for (const element of container.querySelectorAll<HTMLAudioElement>("audio")) {
+    seen.push(element.dataset["identity"] ?? "?");
     if (element.dataset["identity"] === identity) {
+      matched += 1;
       applyElementVolume(element, volume);
+      console.info("[vol-debug] applied", identity, volume, "-> element.volume =", element.volume);
     }
   }
+  console.info("[vol-debug] setRemoteAudioVolume", identity, volume, "matched:", matched, "elements:", seen.join(","));
 }
 
 /** Detach a track's hidden elements (unsubscribe path). */
