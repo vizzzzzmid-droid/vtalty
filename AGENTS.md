@@ -36,7 +36,7 @@
   fullscreen overlay (native Fullscreen API removed), and the silent
   screen-share audio root cause is fixed (visually-hidden audio element
   instead of `display:none` + suspended upmix AudioContext resume +
-  gesture unlock). Follow-up fix (3c55680): audio played LEFT-EAR-ONLY in one ear - a ChannelMergerNode maps input N to output channel N and bare `connect(merger)` fed input 0 (left) only; both upmix sites (screen.ts, chain.ts) now feed BOTH inputs, stereo sources keep L/R via ChannelSplitter, and chain.ts's dead mono detection (`gain.channelCount === 1` is never true) now reads the track's `getSettings().channelCount`; all TEMP-DEBUG(screen-audio) logging removed. STOP after reporting, wait for "continue".
+  gesture unlock). Follow-up fix (3c55680): audio played LEFT-EAR-ONLY in one ear - a ChannelMergerNode maps input N to output channel N and bare `connect(merger)` fed input 0 (left) only; both upmix sites (screen.ts, chain.ts) now feed BOTH inputs, stereo sources keep L/R via ChannelSplitter, and chain.ts's dead mono detection (`gain.channelCount === 1` is never true) now reads the track's `getSettings().channelCount`; all TEMP-DEBUG(screen-audio) logging removed. Follow-up feature (8bc23b1): per-user + per-stream volume BOOST to 400% - native element.volume/LiveKit setVolume cap at 100%, so past 100% elements are rerouted through a WebAudio GainNode (boost.ts, lazy: <=100% stays native). STOP after reporting, wait for "continue".
 - Repo root moved to `vitality/` (clean dir; parent `Default Project` holds
   unrelated files). All paths below are relative to `vitality/`.
 - Local toolchain (this Windows machine): Node 24.19 + pnpm 9.15.0 via
@@ -380,7 +380,26 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   locally: typecheck/lint clean, web 67 unit green, `vite build`; CI `ci` +
   `desktop` green (runs 35981495885/35981495849). Live two-ear check stays
   manual (docs/MANUAL_TESTS.md: centred mic + centred stream audio rows).
-
+- [x] Post-6b feature - per-user/stream volume BOOST to 400% (commit 8bc23b1).
+  HTMLMediaElement.volume and LiveKit participant.setVolume cap at 1.0, so
+  boosting a quiet speaker/stream needs WebAudio: boost.ts lazily reroutes
+  an element through createMediaElementSource -> GainNode(0..MAX_VOLUME=4)
+  -> destination the FIRST time >100% is requested (<=100% stays on native
+  element.volume - no AudioContext, no autoplay risk; a MediaElementSource
+  cannot be reverted, so boosted elements stay gain-controlled with
+  element.volume=1). Shared boost AudioContext resumes on pointerdown/
+  keydown (same unlock pattern as the screen upmix context). Voice:
+  remoteAudio.setRemoteAudioVolume(identity, v) replaces all
+  participant.setVolume calls in room.ts (attach, applyUserVolume,
+  applyAllVolumes); releaseElementVolume on detach/disconnect/teardown.
+  Streams: screen.ts tracks tile audio elements per sharer identity
+  (streamAudioElements map), applies the stored volume on attach and in
+  setStreamVolume. UI: participant + stream sliders max 400 (percent shown
+  in the participant menu). Regression tests (tests/boost.test.ts):
+  clampVolume bounds, MAX_VOLUME=4, boost wiring pins in room/screen/
+  remoteAudio, slider max pins. Verified locally: typecheck/lint clean,
+  web unit green, `vite build`. Live loudness/distortion check stays manual
+  (docs/MANUAL_TESTS.md volume-boost row).
 ## 8. Known issues / risks
 
 - `@sapphi-red/web-noise-suppressor` 0.4.1 (MIT) verified with the Vite 8
@@ -434,7 +453,7 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   covered by `docs/MANUAL_TESTS.md`. The CI `e2e-voice` job is
   `continue-on-error` (experimental) until it proves green.
 - `ci` + `desktop` workflows GREEN on main (runs 35976612008/35976612056,
-  2026-09-24, latest: 3c55680 stereo-centering fix, runs 35981495885/35981495849):
+  2026-09-24, latest: 8bc23b1 volume-boost feature, runs 35983954587/35983954818):
   lint-typecheck-unit-build, integration (51/51), compose, e2e (3/3),
   stack-smoke full pass incl. native RTC join/publish/presence,
   backup/restore and restart-reconcile, NSIS + AppImage + Electron smoke.

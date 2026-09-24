@@ -1,12 +1,12 @@
-# MANUAL_TESTS вЂ” real-device voice checklist (Phase 4)
+# MANUAL_TESTS РІР‚вЂќ real-device voice checklist (Phase 4)
 
 Automated coverage (unit, integration, chat e2e) cannot hear audio. Work
 through this list on real hardware before calling voice "done". The
 experimental CI `e2e-voice` job covers presence/mute/deafen propagation
-only вЂ” everything below needs ears. Screen-share and noise-suppression rows
+only РІР‚вЂќ everything below needs ears. Screen-share and noise-suppression rows
 are marked; they become pass/fail gates in Phase 5.
 
-Setup: two users (A on one network, B on another вЂ” e.g. phone hotspot vs
+Setup: two users (A on one network, B on another РІР‚вЂќ e.g. phone hotspot vs
 home Wi-Fi), both logged in, both in the same voice channel.
 
 ## Core call matrix
@@ -19,28 +19,28 @@ home Wi-Fi), both logged in, both in the same voice channel.
       A unmutes: audio resumes without rejoin.
 - [ ] A deafens: A hears nothing (incoming silenced), B sees the deafened
       icon AND A appears muted (deafen implies mute). A undeafens: previous
-      mute state returns (was unmuted в†’ talks immediately).
+      mute state returns (was unmuted РІвЂ вЂ™ talks immediately).
 - [ ] A third user C (same server, never joins) sees A+B in the sidebar.
 - [ ] Join/leave sounds play for local joins and remote join/leave.
-- [ ] Per-user volume: B lowers A to 0 в†’ silence; restores to 100 в†’ audio.
+- [ ] Per-user volume: B lowers A to 0 РІвЂ вЂ™ silence; restores to 100 РІвЂ вЂ™ audio.
       Reload the page: the volume persists.
-- [ ] Device switching: A changes input mid-call (Settings в†’ Voice & Audio)
-      в†’ audio continues from the new mic. Same for output device.
+- [ ] Device switching: A changes input mid-call (Settings РІвЂ вЂ™ Voice & Audio)
+      РІвЂ вЂ™ audio continues from the new mic. Same for output device.
 - [ ] Mic test meter moves while talking in Settings.
   - [ ] Mic audio is CENTRED on headphones (noise modes Off/Standard/Enhanced):
         the listener hears the talker in BOTH ears equally, not left-only
         (regression: chain.ts upmix fed only merger input 0; mono detection
         via GainNode.channelCount was dead code).
 - [ ] Push-to-talk: A enables PTT, sets a key, mutes via toggle, holds the
-      key в†’ B hears; release в†’ silence. Works only with the tab focused
+      key РІвЂ вЂ™ B hears; release РІвЂ вЂ™ silence. Works only with the tab focused
       (web limitation, stated in the UI).
-- [ ] Reconnect: A toggles Wi-Fi off for 10s в†’ banner shows "Reconnecting";
-      Wi-Fi back в†’ rejoins automatically, sidebar converges, no duplicates.
-- [ ] Kicked user: admin disconnects B from the participant menu в†’ B drops
+- [ ] Reconnect: A toggles Wi-Fi off for 10s РІвЂ вЂ™ banner shows "Reconnecting";
+      Wi-Fi back РІвЂ вЂ™ rejoins automatically, sidebar converges, no duplicates.
+- [ ] Kicked user: admin disconnects B from the participant menu РІвЂ вЂ™ B drops
       out of the room immediately with no ghost in the sidebar.
-- [ ] Server-mute: admin server-mutes B в†’ B cannot unmute (icon stays);
-      admin lifts в†’ B can unmute.
-- [ ] Restart the `server` container mid-call в†’ participants reappear within
+- [ ] Server-mute: admin server-mutes B РІвЂ вЂ™ B cannot unmute (icon stays);
+      admin lifts РІвЂ вЂ™ B can unmute.
+- [ ] Restart the `server` container mid-call РІвЂ вЂ™ participants reappear within
       ~60s (reconcile), no duplicates, no ghosts after everyone leaves.
 - [ ] Two tabs, one user: second tab joining the same channel evicts the
       first (one session per user); no double presence.
@@ -63,15 +63,18 @@ home Wi-Fi), both logged in, both in the same voice channel.
 - [ ] A shares at each preset (720p30, 1080p30, 1080p60, Source): B watches
       each; text stays readable at 1080p with Text/detail hint; motion stays
       smooth at 1080p60 with Motion hint.
-- [ ] System/tab audio: A shares a tab with audio (Chrome checkbox) в†’ B
+- [ ] System/tab audio: A shares a tab with audio (Chrome checkbox) РІвЂ вЂ™ B
       hears it; note the browser/OS where audio capture is missing.
   - [ ] Stream audio is CENTRED on headphones: B hears the sharers audio in
         BOTH ears equally, not left-only (regression: screen.ts upmix fed only
         merger input 0 = left channel; stereo sources keep L/R via splitter).
+  - [ ] Volume boost past 100%: drag a participant's Volume (sidebar menu) and
+        a stream's volume slider up to 400% - audio gets louder, stays clear,
+        and the setting persists across reload. Below 100% still works natively.
 - [ ] Viewer opt-in: without clicking Watch, B receives no screen bytes
       (check `chrome://webrtc-internals`: no video inbound-rtp for the
       screen SSRC); Stop watching cuts the bytes again.
-- [ ] Multiple sharers: A and B share at once (в‰¤3 default cap; 4th gets
+- [ ] Multiple sharers: A and B share at once (РІвЂ°В¤3 default cap; 4th gets
       frozen with a notice); each tile watches independently.
 - [ ] Deafen silences stream audio too; per-stream volume + mute work.
 - [ ] Stream audio starts without extra clicks: B clicks Watch stream and
@@ -105,7 +108,7 @@ home Wi-Fi), both logged in, both in the same voice channel.
       effective; gate works in every mode.
 - [ ] Mute/deafen interplay: muted + Enhanced switch keeps silence; deafen
       silences everything including loopback.
-- [ ] Fallback: block WebAssembly in the browser (or throttle CPU) в†’ visible
+- [ ] Fallback: block WebAssembly in the browser (or throttle CPU) РІвЂ вЂ™ visible
       "fell back to Standard" notice, call continues.
 
 ## Chromium fake-media flags (for automated UI states)
@@ -132,12 +135,12 @@ assertions are manual-only.
       cancelling denies capture; on Windows "share system audio" works,
       on Linux/macOS capture is video-only (known limit, stated in UI).
 - [ ] Global PTT: enable in connect-screen settings, hold the key anywhere
-      (even unfocused) в†’ talk indicator; on Wayland / macOS-without-permission
+      (even unfocused) РІвЂ вЂ™ talk indicator; on Wayland / macOS-without-permission
       the UI explains the fallback (in-app PTT while focused).
-- [ ] PTT rebind: "RebindвЂ¦" в†’ "ListeningвЂ¦" в†’ press Caps Lock в†’ label updates;
+- [ ] PTT rebind: "RebindРІР‚В¦" РІвЂ вЂ™ "ListeningРІР‚В¦" РІвЂ вЂ™ press Caps Lock РІвЂ вЂ™ label updates;
       Esc cancels; trying Tab/Escape/a bare modifier is rejected with a
       message. Key changes apply after app restart.
-- [ ] Toggle-mute shortcut: save `Ctrl+Alt+P` в†’ works globally after restart;
+- [ ] Toggle-mute shortcut: save `Ctrl+Alt+P` РІвЂ вЂ™ works globally after restart;
       `Alt+F4` and bare `F9` are rejected; a shortcut sharing the PTT key is
       rejected as conflicting.
 - [ ] `Ctrl+Shift+M` toggles mute globally. Minimize hides to tray; tray
@@ -149,8 +152,8 @@ assertions are manual-only.
 - [ ] Kill the app mid-call config: window bounds + settings persist; corrupt
       `vitality-desktop.json` falls back to defaults (no crash).
 - [ ] Self-signed `https://localhost` fails closed ("unreachable") until the
-      Caddy root CA is trusted at OS level вЂ” the app never auto-accepts certs.
-- [ ] Packaging: install the CI NSIS `.exe` on Windows (unsigned в†’
+      Caddy root CA is trusted at OS level РІР‚вЂќ the app never auto-accepts certs.
+- [ ] Packaging: install the CI NSIS `.exe` on Windows (unsigned РІвЂ вЂ™
       SmartScreen prompt is expected) and the AppImage on Linux; the app
       starts, PTT hook loads natively, no missing-`.node` errors in the log.
 - [ ] Windows identity: Task Manager (`Ctrl+Shift+Esc`) shows ONE collapsible
@@ -158,24 +161,24 @@ assertions are manual-only.
       inside) instead of several flat `vitality.exe`/Electron entries; the
       taskbar button, jump list and notification title/icon show "vitality",
       not "Electron". Check the exe version resource (right-click
-      `vitality.exe` в†’ Properties в†’ Details): FileDescription/ProductName =
+      `vitality.exe` РІвЂ вЂ™ Properties РІвЂ вЂ™ Details): FileDescription/ProductName =
       `vitality`, InternalName/OriginalFilename = `vitality.exe`...,
       CompanyName = `vitality contributors`, LegalCopyright =
-      `Copyright В© 2026 vitality contributors`, FileVersion = ProductVersion
+      `Copyright Р’В© 2026 vitality contributors`, FileVersion = ProductVersion
       = the package version.
-      (The AppUserModelID is `shop.kirskiy.vitality` вЂ” same as `appId`, the
+      (The AppUserModelID is `shop.kirskiy.vitality` РІР‚вЂќ same as `appId`, the
       value electron-builder stamps on the shortcuts it creates.)
 - [ ] Tray regression (packaged Windows build): with "Minimize to tray" ON,
-      minimize the window в†’ a **visible** vitality icon appears in the
-      notification area (check the overflow chevron too) в†’ left-click it
-      restores the window, right-click в†’ Show / Change server / Quit. The
+      minimize the window РІвЂ вЂ™ a **visible** vitality icon appears in the
+      notification area (check the overflow chevron too) РІвЂ вЂ™ left-click it
+      restores the window, right-click РІвЂ вЂ™ Show / Change server / Quit. The
       window must never vanish without either a taskbar entry or that tray
       icon. With the setting OFF, minimize keeps a normal taskbar entry and
       close quits. Quit from the tray leaves no ghost icon behind.
 - [ ] Session persistence (aggressive re-auth regression): use the app
-      actively for well over 15 minutes (access TTL) вЂ” including actions
+      actively for well over 15 minutes (access TTL) РІР‚вЂќ including actions
       right after leaving the app backgrounded for a few minutes and after a
-      long-idle WS reconnect вЂ” and confirm you are never returned to the auth
+      long-idle WS reconnect РІР‚вЂќ and confirm you are never returned to the auth
       screen. Two tabs open simultaneously: neither tab kicks the other out
       when both refresh at once. A brief server restart/network drop must NOT
       log you out (a hard 401/403 on refresh still does).
