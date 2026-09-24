@@ -30,10 +30,13 @@
   `extraResources` + a `trayReady` hide-gate; the refresh fix adds a 15 s
   rotation-grace window server-side and single-flight/classified refresh
   client-side (details in §7, manual checks in docs/MANUAL_TESTS.md).
-  `ci` workflow still red on pre-existing server/web failures (integration
-  data assertions, e2e app asserts, smoke LiveKit 502) — documented below, out
-  of desktop scope, not reproducible on this box (no Docker/PG). STOP after
-  reporting, wait for "continue".
+  `ci` + `desktop` both GREEN on main (runs 35976612008/35976612056,
+  2026-09-24) after the post-6b screen-share viewing fix (§7, commit
+  c557a5b): stream tiles are now 16:9 grid cards with a custom in-app
+  fullscreen overlay (native Fullscreen API removed), and the silent
+  screen-share audio root cause is fixed (visually-hidden audio element
+  instead of `display:none` + suspended upmix AudioContext resume +
+  gesture unlock). STOP after reporting, wait for "continue".
 - Repo root moved to `vitality/` (clean dir; parent `Default Project` holds
   unrelated files). All paths below are relative to `vitality/`.
 - Local toolchain (this Windows machine): Node 24.19 + pnpm 9.15.0 via
@@ -137,7 +140,8 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
 - Noise (Phase 5 DONE): Off / Standard (gUM constraints) / Enhanced
   (RNNoise WASM AudioWorklet via `@sapphi-red/web-noise-suppressor` 0.4.1
   MIT, 48 kHz, lazy WASM, fallback to Standard). Screen: opt-in tiles,
-  sharer cap 3, theater/fullscreen, per-stream volume + quality.
+  sharer cap 3, custom fullscreen overlay (native API removed), per-stream
+  volume + quality.
 
 ## 7. Phase log
 
@@ -214,8 +218,8 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   endpoint `GET/PUT users/me/voice-settings` (migration `0004`), CSP
   `wasm-unsafe-eval` (helmet merge + Caddy SPA header, pinned by test + CI
   checks). Web: share dialog (presets 720p30/1080p30/1080p60/source,
-  detail/motion, system-audio note), opt-in StreamTile (theater, fullscreen,
-  quality selector, per-stream volume, degraded hint, LIVE badges), RNNoise
+  detail/motion, system-audio note), opt-in StreamTile (custom fullscreen
+  overlay, quality selector, per-stream volume, degraded hint, LIVE badges), RNNoise
   Enhanced (48 kHz check, lazy WASM, live switching with fallback notice),
   gate + loopback test, server-synced settings. Tests: screen grants/limit/
   stop-share/replay integration, settings validation, screen + noise-mode
@@ -327,6 +331,35 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   NOT verified locally: the visual tray icon and >15 min session survival on a
   packaged Windows build (manual rows added to `docs/MANUAL_TESTS.md`); CI
   rebuild + artifact inspection is the packaging check.
+- [x] Post-6b bugfix — screen-share viewing UX + silent stream audio
+  (commit c557a5b). **1. Native fullscreen replaced.** `requestFullscreen()`
+  showed generic OS/browser chrome and misbehaved in the Electron shell;
+  StreamTile now opens a custom in-app overlay (React portal to
+  `document.body`, `fixed inset-0 z-50 bg-black`, video `object-contain`),
+  top bar with avatar/name/LIVE/volume + always-visible close, Esc to exit,
+  body scroll-lock; a second `<video>` is attached while the overlay is open
+  (tile keeps playing). Theater mode removed (superseded by the overlay).
+  **2. Tiles are a 16:9 grid** (`MainView`:
+  `grid-cols-[repeat(auto-fill,minmax(320px,1fr))]`): placeholder card
+  (avatar, LIVE, "Watch stream") before subscribing; watching card with
+  hover chrome (fullscreen button top-right, sharer-name gradient bottom)
+  and a footer (LIVE, name, Degraded, quality select, volume, stop);
+  `--surface-2`/`--accent-strong` theme tokens; `sharerAvatarUrl` prop.
+  **3. Silent audio root cause** (static analysis; no live LiveKit on this
+  box): (a) the tile `<audio>` was `className="hidden"` = `display:none`,
+  which Chromium suspends (same caveat documented in `remoteAudio.ts`) —
+  now visually-hidden (`absolute h-px w-px opacity-0`); (b) the shared
+  upmix `AudioContext` created without a user gesture stays `suspended`,
+  so `play()` resolved into silence — now `resume()`d on attach, stream
+  audio elements self-unlock on the first pointerdown/keydown (voice uses
+  the autoplay banner; tiles are excluded from it), and `play()` is retried
+  while paused. All `[TEMP-DEBUG]` logging removed. Tests
+  (`tests/screen.test.ts`): pin no-`requestFullscreen`/`exitFullscreen`,
+  overlay portal + close control, audio element not `display:none`.
+  Verified locally: typecheck/lint clean, web 62/62 unit, `vite build`;
+  CI `ci` + `desktop` green (runs 35976612008/35976612056). Live two-client
+  audio/overlay check stays manual (docs/MANUAL_TESTS.md).
+
 
 ## 8. Known issues / risks
 
@@ -380,7 +413,8 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   specs) and compose smoke run in CI; real two-device audio/video is
   covered by `docs/MANUAL_TESTS.md`. The CI `e2e-voice` job is
   `continue-on-error` (experimental) until it proves green.
-- `ci` + `desktop` workflows GREEN on main (run 35707866544, 2026-09-22):
+- `ci` + `desktop` workflows GREEN on main (runs 35976612008/35976612056,
+  2026-09-24, latest: c557a5b screen-share viewing fix):
   lint-typecheck-unit-build, integration (51/51), compose, e2e (3/3),
   stack-smoke full pass incl. native RTC join/publish/presence,
   backup/restore and restart-reconcile, NSIS + AppImage + Electron smoke.

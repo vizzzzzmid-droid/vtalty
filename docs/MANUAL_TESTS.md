@@ -67,8 +67,20 @@ home Wi-Fi), both logged in, both in the same voice channel.
 - [ ] Multiple sharers: A and B share at once (≤3 default cap; 4th gets
       frozen with a notice); each tile watches independently.
 - [ ] Deafen silences stream audio too; per-stream volume + mute work.
-- [ ] Theater mode expands the tile; fullscreen fills the display; quality
-      selector Low/Medium/High/Auto visibly changes inbound resolution.
+- [ ] Stream audio starts without extra clicks: B clicks Watch stream and
+      hears the sharer's system/tab audio immediately (no "click to enable"
+      banner on tiles); if the first watch was silent, reload and retry -
+      report browser/OS (regression: display:none audio + suspended
+      AudioContext fixed in c557a5b).
+- [ ] Tiles render as a 16:9 grid (320px+ columns, wraps on narrow windows);
+      placeholder card shows avatar + LIVE + Watch stream; hovering a playing
+      tile reveals the fullscreen button (top-right) and sharer name (bottom).
+- [ ] Fullscreen overlay: fills the whole window in-app (no browser/OS
+      chrome), video keeps playing, top bar shows avatar/name/LIVE/volume +
+      close button; the close button and Esc both exit; the background page
+      does not scroll. Repeat in the desktop app (Electron).
+- [ ] Quality selector Low/Medium/High/Auto visibly changes inbound
+      resolution.
 - [ ] Sharer with poor connection shows the "degraded" hint on viewers.
 - [ ] Browser "Stop sharing" ends the stream cleanly (no ghost LIVE badge).
 - [ ] Moderator "stop stream" freezes the share; badge clears for viewers.
