@@ -9,6 +9,21 @@ type LiveKitModule = typeof import("livekit-client");
 
 let livekitModule: LiveKitModule | null = null;
 
+// TEMP-DEBUG(screen-audio): temporary diagnostics for the silent screen-share
+// audio bug. Remove everything referencing this tag in the follow-up fix.
+const DEBUG_AUDIO_TAG = "[TEMP-DEBUG(screen-audio)]";
+
+export function debugAudio(step: string, details: Record<string, unknown> = {}): void {
+  console.log(`${DEBUG_AUDIO_TAG} ${step} ${JSON.stringify(details)}`);
+}
+
+function describeError(err: unknown): Record<string, unknown> {
+  if (err instanceof Error) {
+    return { errorName: err.name, errorMessage: err.message };
+  }
+  return { error: String(err) };
+}
+
 async function livekit(): Promise<LiveKitModule> {
   if (livekitModule === null) {
     livekitModule = await import("livekit-client");
@@ -169,6 +184,12 @@ function publicationsOf(identity: string): ScreenPublications | null {
 /** Opt in: subscribe to a sharer's screen tracks (video + audio). */
 export function watchStream(identity: string): void {
   const publications = publicationsOf(identity);
+  debugAudio("watchStream", {
+    identity,
+    hasVideoPublication: publications?.video !== undefined,
+    hasAudioPublication: publications?.audio !== undefined,
+    audioSubscribed: publications?.audio?.isSubscribed ?? null,
+  });
   const deafened = useVoiceConnection.getState().selfDeafened;
   const volumes = useVoiceSettings.getState().streamVolumes;
   publications?.video?.setSubscribed(true);
@@ -262,7 +283,17 @@ export function attachStreamAudio(
   resumeStreamAudioContext();
   const pub = publicationsOf(identity)?.audio;
   const track = pub?.track;
+  debugAudio("attachStreamAudio:entry", {
+    identity,
+    hasPublication: pub !== undefined,
+    publicationSource: (pub as { source?: unknown } | undefined)?.source ?? null,
+    hasTrack: track !== undefined && track !== null,
+    trackKind: (track as { kind?: unknown } | undefined | null)?.kind ?? null,
+    elementSrcObject: element.srcObject === null ? "null" : "set",
+    elementPaused: element.paused,
+  });
   if (track === undefined || track === null) {
+    debugAudio("attachStreamAudio:early-return", { identity, reason: "no track yet" });
     return () => {
       liveAudioElements.delete(element);
     };
@@ -275,13 +306,22 @@ export function attachStreamAudio(
     if (mediaStreamTrack !== null && mediaStreamTrack !== undefined) {
       const upmixed = upmixToStereo(mediaStreamTrack);
       if (upmixed !== null) {
+        debugAudio("attachStreamAudio:path", { identity, path: "upmix" });
         element.srcObject = upmixed;
       } else {
+        debugAudio("attachStreamAudio:path", {
+          identity,
+          path: "direct-attach (upmix returned null)",
+        });
         track.attach(element);
       }
     } else {
       // Fallback: attach directly if we can't access the underlying track.
       // In this case, we use the track's attach method which handles cleanup.
+      debugAudio("attachStreamAudio:path", {
+        identity,
+        path: "direct-attach (no mediaStreamTrack)",
+      });
       track.attach(element);
     }
     tryPlay(element);
@@ -328,6 +368,15 @@ function upmixToStereo(track: MediaStreamTrack): MediaStream | null {
     if (ctx === null) {
       ctx = new AudioContext({ sampleRate: 48000 });
       sharedContext = ctx;
+      debugAudio("upmix:context-created", {
+        state: ctx.state,
+        sampleRate: ctx.sampleRate,
+      });
+      ctx.addEventListener("statechange", () => {
+        debugAudio("upmix:context-statechange", { state: sharedContext?.state ?? "gone" });
+      });
+    } else {
+      debugAudio("upmix:context-reused", { state: ctx.state });
     }
     resumeStreamAudioContext();
     // Wrap the track in a MediaStream for createMediaStreamSource.
@@ -337,8 +386,14 @@ function upmixToStereo(track: MediaStreamTrack): MediaStream | null {
     source.connect(merger);
     const dest = ctx.createMediaStreamDestination();
     merger.connect(dest);
+    debugAudio("upmix:graph-built", {
+      contextState: ctx.state,
+      inputChannelCount: track.getSettings().channelCount ?? null,
+      outputAudioTracks: dest.stream.getAudioTracks().length,
+    });
     return dest.stream;
-  } catch {
+  } catch (err) {
+    debugAudio("upmix:threw", describeError(err));
     return null;
   }
 }
@@ -358,16 +413,58 @@ const liveAudioElements = new Set<HTMLAudioElement>();
 let unlockListenersInstalled = false;
 
 function resumeStreamAudioContext(): void {
-  if (sharedContext !== null && sharedContext.state === "suspended") {
-    void sharedContext.resume();
+  if (sharedContext === null) {
+    return;
+  }
+  // Only act (and log) when a resume is actually needed; the statechange
+  // listener in upmixToStereo records the outcome of every transition.
+  if (sharedContext.state === "suspended") {
+    debugAudio("resumeContext:resume-called", { state: sharedContext.state });
+    void sharedContext
+      .resume()
+      .then(() => {
+        debugAudio("resumeContext:resume-resolved", {
+          state: sharedContext?.state ?? "gone",
+        });
+      })
+      .catch((err: unknown) => {
+        debugAudio("resumeContext:resume-rejected", describeError(err));
+      });
   }
 }
 
+function elementSnapshot(element: HTMLAudioElement): Record<string, unknown> {
+  const src = element.srcObject as MediaStream | null;
+  return {
+    srcObject:
+      src === null
+        ? "null"
+        : `MediaStream(audio=${String(src.getAudioTracks().length)},video=${String(src.getVideoTracks().length)})`,
+    muted: element.muted,
+    volume: element.volume,
+    paused: element.paused,
+    readyState: element.readyState,
+  };
+}
+
 function tryPlay(element: HTMLAudioElement): void {
+  debugAudio("play:before", elementSnapshot(element));
   try {
-    element.play().catch(() => undefined);
-  } catch {
+    element
+      .play()
+      .then(() => {
+        debugAudio("play:resolved", {
+          paused: element.paused,
+          readyState: element.readyState,
+          currentTime: Math.round(element.currentTime * 100) / 100,
+        });
+      })
+      .catch((err: unknown) => {
+        debugAudio("play:rejected", describeError(err));
+      });
+  } catch (err) {
     // Autoplay blocked; the gesture listener retries on the next interaction.
+    debugAudio("play:threw-sync", describeError(err));
   }
 }
 
@@ -376,7 +473,13 @@ function installAudioUnlockListeners(): void {
     return;
   }
   unlockListenersInstalled = true;
-  const unlock = (): void => {
+  const unlock = (event: Event): void => {
+    debugAudio("unlock:gesture-fired", {
+      eventType: event.type,
+      contextState: sharedContext?.state ?? "none",
+      liveElements: liveAudioElements.size,
+      pausedElements: [...liveAudioElements].filter((el) => el.paused).length,
+    });
     resumeStreamAudioContext();
     for (const element of liveAudioElements) {
       if (element.paused) {
@@ -386,6 +489,7 @@ function installAudioUnlockListeners(): void {
   };
   document.addEventListener("pointerdown", unlock);
   document.addEventListener("keydown", unlock);
+  debugAudio("unlock:listeners-installed", { events: "pointerdown+keydown" });
 }
 
 /** Live connection quality of a sharer (for the "degraded" hint). */

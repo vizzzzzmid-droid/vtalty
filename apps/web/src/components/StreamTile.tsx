@@ -5,6 +5,7 @@ import { useVoiceSettings } from "../voice/settings.js";
 import {
   attachStreamAudio,
   attachStreamVideo,
+  debugAudio,
   isDegradedQuality,
   setStreamQuality,
   setStreamVolume,
@@ -54,6 +55,14 @@ export function StreamTile({
     }
     watchStream(sharerId);
     const attach = (): void => {
+      // TEMP-DEBUG(screen-audio): is the (re)attach loop running at all, and
+      // do the media elements exist when attachStreamAudio is invoked?
+      debugAudio("tile:attach-tick", {
+        sharerId,
+        hasVideoElement: videoRef.current !== null,
+        hasOverlayVideoElement: overlayVideoRef.current !== null,
+        hasAudioElement: audioRef.current !== null,
+      });
       if (videoRef.current !== null) {
         attachStreamVideo(sharerId, videoRef.current);
       }
