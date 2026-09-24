@@ -9,6 +9,14 @@ const tileSource = readFileSync(
   resolve(process.cwd(), "src/components/StreamTile.tsx"),
   "utf8",
 );
+const screenSource = readFileSync(
+  resolve(process.cwd(), "src/voice/screen.ts"),
+  "utf8",
+);
+const chainSource = readFileSync(
+  resolve(process.cwd(), "src/voice/chain.ts"),
+  "utf8",
+);
 
 describe("noise suppression mono-to-stereo upmix", () => {
   it("RNNoiseWorkletNode uses maxChannels: 1 (mono processing)", () => {
@@ -104,5 +112,44 @@ describe("stream audio element", () => {
       .find((line) => line.trimStart().startsWith("<audio"));
     expect(audioTag).toBeDefined();
     expect(audioTag).not.toContain('className="hidden"');
+  });
+});
+
+// Regression: screen-share/mic audio played in the LEFT ear only. A
+// ChannelMergerNode maps input N to output channel N, so a bare
+// `connect(merger)` lands a mono source on input 0 (left) with the right
+// channel silent. The same source must be fed into BOTH inputs (0 and 1).
+describe("mono→stereo centering (left-ear regression)", () => {
+  it("screen-share upmix feeds the source into BOTH merger inputs", () => {
+    expect(screenSource).toContain("source.connect(merger, 0, 0)");
+    expect(screenSource).toContain("source.connect(merger, 0, 1)");
+    // No bare connect(merger); STATEMENT (line-start, immediate close paren).
+    expect(screenSource).not.toMatch(/^\s*\w+\.connect\(merger\);/m);
+  });
+
+  it("screen-share upmix keeps genuine stereo sources separated", () => {
+    // A merger input down-mixes stereo to mono; stereo sources must go
+    // through a ChannelSplitter so L and R land on inputs 0 and 1.
+    expect(screenSource).toContain("createChannelSplitter(2)");
+    expect(screenSource).toContain("splitter.connect(merger, 0, 0)");
+    expect(screenSource).toContain("splitter.connect(merger, 1, 1)");
+  });
+
+  it("noise-suppression chain upmix feeds the source into BOTH merger inputs", () => {
+    expect(chainSource).toContain("gain.connect(merger, 0, 0)");
+    expect(chainSource).toContain("gain.connect(merger, 0, 1)");
+    expect(chainSource).not.toMatch(/^\s*\w+\.connect\(merger\);/m);
+  });
+
+  it("mic-chain mono detection does not rely on GainNode.channelCount", () => {
+    // GainNode.channelCount defaults to 2 (mode "max"), so
+    // `gain.channelCount === 1` is never true and the upmix never ran.
+    expect(chainSource).not.toMatch(/^\s*if \([^\n]*channelCount === 1/m);
+  });
+
+  it("no TEMP-DEBUG(screen-audio) instrumentation remains", () => {
+    expect(screenSource).not.toContain("TEMP-DEBUG");
+    expect(tileSource).not.toContain("TEMP-DEBUG");
+    expect(chainSource).not.toContain("TEMP-DEBUG");
   });
 });

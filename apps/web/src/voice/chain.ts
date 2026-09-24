@@ -98,11 +98,18 @@ export async function buildMicChain(options: MicChainOptions): Promise<MicChain>
     // included). Standard mode may already be stereo; we only up-mix when needed.
     let finalNode: AudioNode = analyser;
     if (options.noiseMode === "enhanced" || options.noiseSuppression) {
-      const sourceNode = gain;
       try {
-        if (sourceNode.channelCount === 1) {
+        // Detect mono from the TRACK, not from the GainNode: a GainNode's
+        // channelCount defaults to 2 (channelCountMode "max"), so
+        // `gain.channelCount === 1` was never true and this upmix never ran.
+        const micChannels = stream.getAudioTracks()[0]?.getSettings().channelCount;
+        if (options.noiseMode === "enhanced" || micChannels === 1) {
           const merger = context.createChannelMerger(2);
-          sourceNode.connect(merger);
+          // ChannelMergerNode maps input N to output channel N: a bare
+          // `connect(merger)` feeds input 0 (LEFT) only — one-ear audio.
+          // Feed the SAME mono source into BOTH inputs so it is centred.
+          gain.connect(merger, 0, 0);
+          gain.connect(merger, 0, 1);
           // Route both channels of the merger to the analyser (for the meter) and destination.
           merger.connect(analyser);
           finalNode = merger;
