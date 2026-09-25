@@ -139,7 +139,12 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   LiveKit on Linux preferred.
 - Noise (Phase 5 DONE): Off / Standard (gUM constraints) / Enhanced
   (RNNoise WASM AudioWorklet via `@sapphi-red/web-noise-suppressor` 0.4.1
-  MIT, 48 kHz, lazy WASM, fallback to Standard). Screen: opt-in tiles,
+  MIT, 48 kHz, lazy WASM, fallback to Standard) / Deep (DeepFilterNet3 WASM
+  AudioWorklet via `@lofcz/deepfilternet-web` 0.1.0, 48 kHz, ~34 MB model
+  fetched lazily once, fallback Deep → Enhanced → Standard). Enhanced+Deep are
+  "neural modes": 48 kHz mono context, browser noiseSuppression forced off,
+  mono→stereo upmix; the Deep worklet is used as a plain AudioWorkletNode so
+  our gate/gain/analyser chain stays in control. Screen: opt-in tiles,
   sharer cap 3, custom fullscreen overlay (native API removed), per-stream
   volume + quality.
 
@@ -458,6 +463,14 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
 - `@sapphi-red/web-noise-suppressor` 0.4.1 (MIT) verified with the Vite 8
   build (worklet + wasm ship in dist, asserted in CI); needs 48 kHz +
   AudioWorklet + WASM, otherwise auto-falls back to Standard with notice.
+- `@lofcz/deepfilternet-web` 0.1.0 (DeepFilterNet mode) verified the same way;
+  its model is ~34 MB (~12.8 MB gzip) and is downloaded once, on demand, so
+  the first switch to Deep can leave the mic silent for a few seconds on a
+  slow link. Only the package's worklet + wasm ASSETS are used (Vite `?url`,
+  never on the boot path); its own stream helper is deliberately NOT used
+  because it would create its own AudioContext and bypass our gate/gain/
+  analyser chain.
+
 - Desktop packaging cannot be built on this Windows box:
   `pnpm --filter @vitality/desktop dist` stops in `@electron/rebuild` for
   `uiohook-napi` ("Could not find any Visual Studio installation to use"), so

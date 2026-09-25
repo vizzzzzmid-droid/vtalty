@@ -129,7 +129,7 @@ export const voiceStopShareBodySchema = z.object({
 // (server copy wins at boot so settings follow the user across devices).
 // Nothing sensitive is stored: device ids only select local hardware.
 export const voiceSettingsSchema = z.object({
-  noiseMode: z.enum(["off", "standard", "enhanced"]),
+  noiseMode: z.enum(["off", "standard", "enhanced", "deep"]),
   noiseSuppression: z.boolean(),
   echoCancellation: z.boolean(),
   autoGainControl: z.boolean(),

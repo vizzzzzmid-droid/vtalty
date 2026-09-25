@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 
-export type NoiseMode = "off" | "standard" | "enhanced";
+export type NoiseMode = "off" | "standard" | "enhanced" | "deep";
 
 interface VoiceSettings {
   inputDeviceId: string | null;

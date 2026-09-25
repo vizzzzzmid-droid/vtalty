@@ -12,6 +12,7 @@ import { ApiError } from "../api/http.js";
 import { requestVoiceToken } from "../api/resources.js";
 import { sendVoiceFlags } from "../ws/socket.js";
 import { buildMicChain, type MicChain } from "./chain.js";
+import { DeepFilterUnavailableError } from "./deepfilter.js";
 import { EnhancedUnavailableError } from "./rnnoise.js";
 import {
   attachRemoteAudio,
@@ -282,13 +283,33 @@ function chainOptionsFromPrefs(): Parameters<typeof buildMicChain>[0] {
   };
 }
 
-/** Build the configured chain, falling back Standard on Enhanced failure. */
+/** Build the configured chain, falling back Standard when a neural mode fails. */
 async function buildMicChainWithFallback(): Promise<MicChain> {
   const prefs = useVoiceSettings.getState();
   try {
     return await buildMicChain(chainOptionsFromPrefs());
   } catch (err) {
-    if (prefs.noiseMode === "enhanced" && err instanceof EnhancedUnavailableError) {
+    const neuralUnavailable =
+      err instanceof EnhancedUnavailableError ||
+      err instanceof DeepFilterUnavailableError;
+    if (neuralUnavailable && (prefs.noiseMode === "enhanced" || prefs.noiseMode === "deep")) {
+      // Deep mode is the heaviest (34 MB WASM), so a failure there first tries
+      // the lighter RNNoise Enhanced mode and only then Standard.
+      if (prefs.noiseMode === "deep") {
+        prefs.set({ noiseMode: "enhanced" });
+        try {
+          const retried = await buildMicChain(chainOptionsFromPrefs());
+          snapshot().set({
+            audioNotice:
+              "DeepFilterNet is unavailable here; fell back to Enhanced (RNNoise).",
+          });
+          return retried;
+        } catch (retryErr) {
+          if (!(retryErr instanceof EnhancedUnavailableError)) {
+            throw retryErr;
+          }
+        }
+      }
       prefs.set({ noiseMode: "standard" });
       snapshot().set({
         audioNotice:

@@ -1,5 +1,14 @@
 import type { NoiseMode } from "./settings.js";
+import { createDeepFilterNode } from "./deepfilter.js";
 import { createGateNode, createRnnoiseNode } from "./rnnoise.js";
+
+/** Modes that run a neural suppressor, so the browser stages must stay off. */
+const neuralModes: readonly NoiseMode[] = ["enhanced", "deep"];
+
+/** True for modes that force a 48 kHz context and process audio in mono. */
+function isNeuralMode(mode: NoiseMode): boolean {
+  return neuralModes.includes(mode);
+}
 
 export interface MicChainOptions {
   deviceId: string | null;
@@ -48,6 +57,8 @@ export async function buildMicChain(options: MicChainOptions): Promise<MicChain>
     constraints.echoCancellation = options.echoCancellation;
     constraints.autoGainControl = options.autoGainControl;
   } else {
+    // Both neural modes (RNNoise, DeepFilterNet) do their own cleanup, so the
+    // browser stages stay off to avoid double processing.
     constraints.noiseSuppression = false;
     constraints.echoCancellation = false;
     constraints.autoGainControl = false;
@@ -68,16 +79,19 @@ export async function buildMicChain(options: MicChainOptions): Promise<MicChain>
     }
   };
   try {
-    context =
-      options.noiseMode === "enhanced"
-        ? new AudioContext({ sampleRate: 48000 })
-        : new AudioContext();
+    context = isNeuralMode(options.noiseMode)
+      ? new AudioContext({ sampleRate: 48000 })
+      : new AudioContext();
     const source = context.createMediaStreamSource(stream);
     let head: AudioNode = source;
     if (options.noiseMode === "enhanced") {
       const rnnoise = await createRnnoiseNode(context);
       head.connect(rnnoise);
       head = rnnoise;
+    } else if (options.noiseMode === "deep") {
+      const deep = await createDeepFilterNode(context);
+      head.connect(deep);
+      head = deep;
     }
     if (options.gateEnabled) {
       const gate = await createGateNode(context, {
@@ -97,13 +111,13 @@ export async function buildMicChain(options: MicChainOptions): Promise<MicChain>
     // This prevents the "left ear only" symptom on some renderers (Electron/Chromium
     // included). Standard mode may already be stereo; we only up-mix when needed.
     let finalNode: AudioNode = analyser;
-    if (options.noiseMode === "enhanced" || options.noiseSuppression) {
+    if (isNeuralMode(options.noiseMode) || options.noiseSuppression) {
       try {
         // Detect mono from the TRACK, not from the GainNode: a GainNode's
         // channelCount defaults to 2 (channelCountMode "max"), so
         // `gain.channelCount === 1` was never true and this upmix never ran.
         const micChannels = stream.getAudioTracks()[0]?.getSettings().channelCount;
-        if (options.noiseMode === "enhanced" || micChannels === 1) {
+        if (isNeuralMode(options.noiseMode) || micChannels === 1) {
           const merger = context.createChannelMerger(2);
           // ChannelMergerNode maps input N to output channel N: a bare
           // `connect(merger)` feeds input 0 (LEFT) only — one-ear audio.

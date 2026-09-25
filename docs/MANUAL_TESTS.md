@@ -123,6 +123,15 @@ home Wi-Fi), both logged in, both in the same voice channel.
       silences everything including loopback.
 - [ ] Fallback: block WebAssembly in the browser (or throttle CPU) РІвЂ вЂ™ visible
       "fell back to Standard" notice, call continues.
+- [ ] Deep (DeepFilterNet3): first selection downloads the model (~34 MB,
+      one-off; on a slow link the mic may be silent for a few seconds);
+      afterwards it starts instantly. Verify against the same noisy room
+      as Enhanced and compare.
+- [ ] Deep on a weak laptop: watch CPU in the OS monitor; acceptable = no
+      audio glitches reported by the other side.
+- [ ] Deep stereo check: the voice is CENTRED, not louder in one ear.
+- [ ] Deep offline/second attempt: with the model download blocked, the
+      "fell back to Enhanced (RNNoise)" notice appears and the call continues.
 
 ## Chromium fake-media flags (for automated UI states)
 

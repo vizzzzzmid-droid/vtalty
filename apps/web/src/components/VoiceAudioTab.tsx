@@ -237,6 +237,18 @@ export function VoiceAudioTab(): React.JSX.Element {
             />
             Enhanced — RNNoise neural suppression (48 kHz, heavier CPU)
           </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="radio"
+              name="noise-mode"
+              checked={settings.noiseMode === "deep"}
+              onChange={() => {
+                settings.set({ noiseMode: "deep" });
+                applyLiveChange();
+              }}
+            />
+            Deep — DeepFilterNet3 (48 kHz, best quality, ~34 MB model download)
+          </label>
         </div>
       </fieldset>
       {settings.noiseMode === "standard" ? (

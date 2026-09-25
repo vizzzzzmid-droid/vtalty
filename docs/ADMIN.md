@@ -49,8 +49,11 @@ Traffic-cap warning: 30 Mbit/s for one hour ≈ **13.5 GB** of transfer
 that load. Keep the default 1080p30 preset, `VOICE_MAX_SHARERS=3`, and
 viewer opt-in; downscale presets before upsizing the VPS.
 
-CPU: RNNoise Enhanced mode runs per-speaker in browsers (not on the VPS),
-so server CPU scales with rooms and API traffic, not with suppression.
+CPU: RNNoise/DeepFilterNet modes run per-speaker in browsers (not on the
+VPS), so server CPU scales with rooms and API traffic, not with suppression.
+The Deep model (~34 MB, ≈12.8 MB gzip) is served by the web container as a
+static asset on first use and then cached by the browser; the VPS only
+carries that one-time download, never the audio.
 
 ## Upgrade procedure
 

@@ -431,25 +431,37 @@ on demand ("Watch stream" opt-in).
 
 ## 9. Noise suppression + Voice & Audio settings
 
-Three modes (user setting, persisted to localStorage + server profile via
+Four modes (user setting, persisted to localStorage + server profile via
 `GET/PUT /api/v1/users/me/voice-settings`, which wins at boot):
 
 1. Off — raw mic.
 2. Standard — `getUserMedia` constraints (`noiseSuppression`,
    `echoCancellation`, `autoGainControl`) with individual toggles.
 3. Enhanced — RNNoise (WASM, AudioWorklet) in the mic chain
-   (`getUserMedia → RNNoise → gate? → gain → analyser → destination`,
+   (`getUserMedia → suppressor → gate? → gain → analyser → destination`,
    published as a processed track).
+4. Deep — DeepFilterNet3 (WASM, AudioWorklet) in the same chain slot;
+   strongest suppression on speech-shaped noise, heaviest cost.
+
+Modes 3 and 4 are "neural": both force a 48 kHz mono context, so browser
+`noiseSuppression` is forced off (double processing) and the mono output is
+up-mixed to stereo through a `ChannelMergerNode` (centred playback).
 
 Implemented with `@sapphi-red/web-noise-suppressor` 0.4.1 (MIT, verified
 against the installed types + Vite `?url` worklet/wasm imports; RNNoise
-core BSD-3-Clause). Requires a 48 kHz AudioContext (checked at runtime,
-fallback to Standard with notice), AudioWorklet + WASM (lazy-loaded only
-when Enhanced is selected). Build gotcha (verified): Vite inlines `?url`
-assets under 4 KiB as `data:` URLs, which AudioWorklet rejects — so
-`assetsInlineLimit: 0` forces real files (CI asserts both worklets +
-both wasms in dist). When Enhanced is on, browser
-`noiseSuppression` is forced off to avoid double processing. Mode/device
+core BSD-3-Clause) and `@lofcz/deepfilternet-web` 0.1.0 (DeepFilterNet3
+WASM model, fetched lazily only when the mode is picked). Only the Deep
+package's two ASSETS are used (worklet + `df_bg.wasm` via `?url`) and the
+worklet is instantiated as a plain `AudioWorkletNode`, so our own
+gate/gain/analyser/loopback chain stays in control — the package's
+end-to-end stream helper would create its own AudioContext and bypass it.
+Requires a 48 kHz AudioContext (checked at runtime, fallback with notice),
+AudioWorklet + WASM. Fallback ladder: Deep → Enhanced → Standard, so a
+missing capability degrades instead of killing the mic. Build gotcha
+(verified): Vite inlines `?url` assets under 4 KiB as `data:` URLs, which
+AudioWorklet rejects — so `assetsInlineLimit: 0` forces real files (CI
+asserts both worklets + all wasms in dist). Note the Deep model is ~34 MB
+(≈12.8 MB gzip) and is downloaded once, on demand, per browser. Mode/device
 changes rebuild the chain live without leaving the room (mute preserved).
 
 Also: library `NoiseGateWorkletNode`-independent local gate? No — the

@@ -58,6 +58,15 @@ describeIf("voice settings", () => {
       inputVolume: 1,
     });
 
+    const deep = await ctx.app.inject({
+      method: "PUT",
+      url: "/api/v1/users/me/voice-settings",
+      headers: authHeader(user),
+      payload: { noiseMode: "deep" },
+    });
+    expect(deep.statusCode).toBe(200);
+    expect(deep.json()).toMatchObject({ noiseMode: "deep" });
+
     const anon = await ctx.app.inject({
       method: "GET",
       url: "/api/v1/users/me/voice-settings",
