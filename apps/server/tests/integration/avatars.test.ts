@@ -51,6 +51,26 @@ async function uploadAvatar(
   return { status: res.statusCode, json: res.json() };
 }
 
+async function serverInvite(
+  ctx: TestContext,
+  owner: TestUser,
+): Promise<string> {
+  const created = await ctx.app.inject({
+    method: "POST",
+    url: "/api/v1/servers",
+    headers: authHeader(owner),
+    payload: { name: "Avatar Server" },
+  });
+  const server = created.json() as { id: string };
+  const invite = await ctx.app.inject({
+    method: "POST",
+    url: `/api/v1/servers/${server.id}/invites`,
+    headers: authHeader(owner),
+    payload: {},
+  });
+  return (invite.json() as { code: string }).code;
+}
+
 describeIf("avatars", () => {
   let ctx: TestContext;
   let uploadDir = "";
@@ -108,7 +128,7 @@ describeIf("avatars", () => {
 
   it("only lets a user change their own avatar", async () => {
     const alice = await registerUser(ctx, "aliceavatar");
-    const bob = await registerUser(ctx, "bobalavatar");
+    const bob = await registerUser(ctx, "bobalavatar", await serverInvite(ctx, alice));
     await uploadAvatar(ctx, alice, await pngOf(64, 64));
     // There is no id-addressed mutation route: /me/avatar always targets the
     // caller, so Bob's upload can never touch Alice's row.
@@ -173,9 +193,9 @@ describeIf("avatars", () => {
       headers: authHeader(owner),
     });
     const body = state.json() as {
-      memberList: { user: { id: string; avatarUrl: string | null } }[];
+      members: { user: { id: string; avatarUrl: string | null } }[];
     };
-    const me = body.memberList.find((entry) => entry.user.id === owner.id);
+    const me = body.members.find((entry) => entry.user.id === owner.id);
     expect(me?.user.avatarUrl).toContain(`/api/v1/users/${owner.id}/avatar?e=`);
   });
 });
