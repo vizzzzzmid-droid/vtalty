@@ -36,7 +36,7 @@
   fullscreen overlay (native Fullscreen API removed), and the silent
   screen-share audio root cause is fixed (visually-hidden audio element
   instead of `display:none` + suspended upmix AudioContext resume +
-  gesture unlock). Follow-up fix (3c55680): audio played LEFT-EAR-ONLY in one ear - a ChannelMergerNode maps input N to output channel N and bare `connect(merger)` fed input 0 (left) only; both upmix sites (screen.ts, chain.ts) now feed BOTH inputs, stereo sources keep L/R via ChannelSplitter, and chain.ts's dead mono detection (`gain.channelCount === 1` is never true) now reads the track's `getSettings().channelCount`; all TEMP-DEBUG(screen-audio) logging removed. Follow-up feature (8bc23b1): per-user + per-stream volume BOOST to 400% - native element.volume/LiveKit setVolume cap at 100%, so past 100% elements are rerouted through a WebAudio GainNode (boost.ts, lazy: <=100% stays native). STOP after reporting, wait for "continue".
+  gesture unlock). Follow-up fix (3c55680): audio played LEFT-EAR-ONLY in one ear - a ChannelMergerNode maps input N to output channel N and bare `connect(merger)` fed input 0 (left) only; both upmix sites (screen.ts, chain.ts) now feed BOTH inputs, stereo sources keep L/R via ChannelSplitter, and chain.ts's dead mono detection (`gain.channelCount === 1` is never true) now reads the track's `getSettings().channelCount`; all TEMP-DEBUG(screen-audio) logging removed. Follow-up feature (8bc23b1): per-user + per-stream volume BOOST to 400% - native element.volume/LiveKit setVolume cap at 100%, so past 100% elements are rerouted through a WebAudio GainNode (boost.ts, lazy: <=100% stays native). That boost was inaudible in production and is FIXED in fc7cf5a: createMediaElementSource returns silence for srcObject MediaStreams (measured, see §7), so the boost now taps the stream via createMediaStreamSource -> GainNode -> MediaStreamDestination -> element.srcObject. STOP after reporting, wait for "continue".
 - Repo root moved to `vitality/` (clean dir; parent `Default Project` holds
   unrelated files). All paths below are relative to `vitality/`.
 - Local toolchain (this Windows machine): Node 24.19 + pnpm 9.15.0 via
@@ -400,6 +400,34 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   remoteAudio, slider max pins. Verified locally: typecheck/lint clean,
   web unit green, `vite build`. Live loudness/distortion check stays manual
   (docs/MANUAL_TESTS.md volume-boost row).
+- [x] Post-6b fix - the 400% volume BOOST was inaudible (commit fc7cf5a).
+  Live debugging with temporary `[vol-debug]` logs (commits 378b6b2/fc37770)
+  proved the wiring was fine: applyUserVolume -> setRemoteAudioVolume -> the
+  hidden element carrying the matching `dataset.identity`, with boost gain
+  nodes created while `ctx.state` was "running" - yet the sound never changed,
+  while a manual `element.volume = 0` in DevTools still muted. Root cause was
+  measured in a real Chromium (apps/desktop/scripts/audio-boost-probe.mjs:
+  fake mic + RTCPeerConnection loopback + analyser peaks):
+  `createMediaElementSource(element)` returns SILENCE (peak 0.00) when the
+  element's srcObject is a MediaStream - every remote LiveKit track and every
+  stream tile fed from the upmix destination - while the element keeps playing
+  directly, so the 8bc23b1 gain node moved no audible samples at all. Fix
+  (boost.ts): tap the MediaStream instead -
+  `createMediaStreamSource(element.srcObject)` -> GainNode(0..MAX_VOLUME) ->
+  MediaStreamAudioDestinationNode -> `element.srcObject` - deferring the swap
+  until the context runs (a suspended context would hand the element a silent
+  stream) and keeping the element as the final renderer so its sinkId (output
+  device) and autoplay state stay intact; <=100% keeps the native
+  element.volume path. The probe confirms the shipped path end-to-end through
+  `element.captureStream()`: gain 1 -> 1.00, gain 2 -> 2.00, gain 0 -> 0.00
+  (true mute), 11/11 PASS; run it via
+  `pnpm --filter @vitality/desktop probe:audio-boost` (needs the system Edge
+  channel + fake devices, so it is deliberately not part of CI). Tests: the
+  boost wiring pin now forbids the element-source API and the new
+  fake-AudioContext test in tests/volume-wiring.test.ts asserts the graph
+  routing and the srcObject swap (web 77/77); lint/test/build/`-r typecheck`
+  green locally. All TEMP `[vol-debug]` logging removed. Live loudness/mute
+  check stays manual (docs/MANUAL_TESTS.md volume-boost row).
 ## 8. Known issues / risks
 
 - `@sapphi-red/web-noise-suppressor` 0.4.1 (MIT) verified with the Vite 8

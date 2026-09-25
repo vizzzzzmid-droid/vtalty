@@ -71,6 +71,13 @@ home Wi-Fi), both logged in, both in the same voice channel.
   - [ ] Volume boost past 100%: drag a participant's Volume (sidebar menu) and
         a stream's volume slider up to 400% - audio gets louder, stays clear,
         and the setting persists across reload. Below 100% still works natively.
+  - [ ] Boost level sanity (fix fc7cf5a): with a boost above 100% applied,
+        dragging the slider to 0% is a TRUE mute, 100% is the unchanged
+        baseline and 400% is clearly louder; boosted audio still comes out of
+        the device selected in voice settings (the boosted element keeps its
+        sinkId). Headless equivalent: `pnpm --filter @vitality/desktop
+        probe:audio-boost` (fake mic, measures the graph and the element
+        output; needs the system Edge channel).
 - [ ] Viewer opt-in: without clicking Watch, B receives no screen bytes
       (check `chrome://webrtc-internals`: no video inbound-rtp for the
       screen SSRC); Stop watching cuts the bytes again.
