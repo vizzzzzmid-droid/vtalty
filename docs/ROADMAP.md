@@ -27,6 +27,10 @@ in the code. Items move out of this file only with explicit user approval.
 
 - Multi-server UI (schema supports several; MVP UI uses one).
 - Mobile native apps; rich embeds; threads; reactions (post-MVP features).
+- Avatar extras: per-user crop/focal-point editor (uploads are centre-cropped
+  to 256x256 today), animated/gif avatars (webp/png only for now), avatar
+  moderation/reporting, and a server-side orphan sweep for replaced avatar
+  blobs.
 - Smaller Docker images (multi-stage prune, non-root hardening pass).
 
 ## Ops

@@ -155,7 +155,7 @@ export function UserPanel({
         />
       ) : null}
       <div className="flex h-[52px] items-center gap-1 px-2">
-        <Avatar name={name} src={user.avatarUrl} size={32} />
+        <Avatar name={name} id={user.id} src={user.avatarUrl} size={32} />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">{name}</div>
           <div className="truncate text-xs [color:var(--text-muted)]">

@@ -143,7 +143,12 @@ function ParticipantRow({
         className="rounded-full p-0.5"
         style={speaking ? { boxShadow: "0 0 0 2px var(--accent)" } : undefined}
       >
-        <Avatar name={name} src={member?.user.avatarUrl ?? null} size={24} />
+        <Avatar
+          name={name}
+          id={member?.user.id}
+          src={member?.user.avatarUrl ?? null}
+          size={24}
+        />
       </span>
       <span className="min-w-0 flex-1 truncate text-sm">{name}</span>
       {participant.sharingScreen ? (

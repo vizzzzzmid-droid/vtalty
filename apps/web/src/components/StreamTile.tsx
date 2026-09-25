@@ -120,7 +120,7 @@ export function StreamTile({
           >
             LIVE
           </span>
-          <Avatar name={sharerName} src={sharerAvatarUrl ?? null} size={40} />
+          <Avatar name={sharerName} id={sharerId} src={sharerAvatarUrl ?? null} size={40} />
           <span className="max-w-full truncate text-sm [color:var(--text-muted)]">
             {self ? "You are sharing" : `${sharerName} is sharing their screen`}
           </span>
@@ -253,6 +253,7 @@ export function StreamTile({
       {fullscreen
         ? createPortal(
             <StreamOverlay
+              sharerId={sharerId}
               sharerName={sharerName}
               sharerAvatarUrl={sharerAvatarUrl ?? null}
               videoRef={overlayVideoRef}
@@ -277,6 +278,7 @@ export function StreamTile({
  * playing while the overlay is open.
  */
 function StreamOverlay({
+  sharerId,
   sharerName,
   sharerAvatarUrl,
   videoRef,
@@ -286,6 +288,7 @@ function StreamOverlay({
   onVolumeChange,
   onClose,
 }: {
+  sharerId: string;
   sharerName: string;
   sharerAvatarUrl: string | null;
   videoRef: React.MutableRefObject<HTMLVideoElement | null>;
@@ -312,7 +315,7 @@ function StreamOverlay({
       />
       {/* Top bar: identity + controls, always visible. */}
       <div className="absolute inset-x-0 top-0 flex items-center gap-3 bg-gradient-to-b from-black/80 to-transparent px-4 pb-10 pt-3">
-        <Avatar name={sharerName} src={sharerAvatarUrl} size={28} />
+        <Avatar name={sharerName} id={sharerId} src={sharerAvatarUrl} size={28} />
         <span className="truncate text-sm font-medium text-white">{sharerName}</span>
         <span
           aria-label="Live stream"

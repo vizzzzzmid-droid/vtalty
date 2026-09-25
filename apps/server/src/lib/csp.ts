@@ -11,5 +11,8 @@
 export function contentSecurityPolicyDirectives(): Record<string, string[]> {
   return {
     "script-src": ["'self'", "'wasm-unsafe-eval'"],
+    // Helmet defaults img-src to 'self' data:, which blocks the avatar
+    // picker's object-URL preview in the production build.
+    "img-src": ["'self'", "data:", "blob:"],
   };
 }

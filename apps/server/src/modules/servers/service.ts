@@ -25,6 +25,7 @@ import {
   getPresenceStatus,
 } from "../../ws/hub.js";
 import { syncSubscriptions } from "../members/service.js";
+import { avatarUrlFor } from "../users/service.js";
 import { voiceStore } from "../voice/store.js";
 
 export interface ServerSummary {
@@ -265,7 +266,7 @@ export async function getServerState(
       id: row.user.id,
       username: row.user.username,
       displayName: row.user.displayName,
-      avatarUrl: row.user.avatarUrl ?? null,
+      avatarUrl: avatarUrlFor(row.user),
     },
     presence: {
       userId: row.member.userId,

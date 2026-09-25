@@ -117,7 +117,7 @@ export function MessageItem({
         mentioned ? "[background-color:color-mix(in_srgb,var(--accent)_12%,transparent)]" : ""
       }`}
     >
-      <Avatar name={authorName} src={authorAvatar} size={36} />
+      <Avatar name={authorName} id={message.authorId} src={authorAvatar} size={36} />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2">
           <span className="text-sm font-medium">{authorName}</span>

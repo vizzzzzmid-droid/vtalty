@@ -81,6 +81,56 @@ export function patchMe(patchBody: {
   return patch<User>("/users/me", patchBody);
 }
 
+/** Largest avatar the server accepts (see AVATAR_MAX_BYTES server-side). */
+export const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+const AVATAR_TYPES = ["image/png", "image/jpeg", "image/webp"];
+
+/**
+ * Client-side guard mirroring the server rules: type and size are checked
+ * here only to give instant feedback, never as a security boundary.
+ */
+export function validateAvatarFile(file: File): string | null {
+  if (!AVATAR_TYPES.includes(file.type)) {
+    return "Choose a PNG, JPEG or WebP image";
+  }
+  if (file.size > AVATAR_MAX_BYTES) {
+    return "Avatars must be 2 MB or smaller";
+  }
+  return null;
+}
+
+/** Upload (and replace) the caller's own avatar. */
+export async function uploadAvatar(file: File): Promise<User> {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  const res = await authedFetch("/api/v1/users/me/avatar", {
+    method: "PUT",
+    body: form,
+  });
+  if (!res.ok) {
+    let code = "UPLOAD_FAILED";
+    let message = `Upload failed with status ${res.status}`;
+    try {
+      const data = (await res.json()) as { error?: { code?: unknown; message?: unknown } };
+      if (typeof data.error?.code === "string") {
+        code = data.error.code;
+      }
+      if (typeof data.error?.message === "string") {
+        message = data.error.message;
+      }
+    } catch {
+      // Non-JSON error body; keep the fallback.
+    }
+    throw new ApiError(res.status, code, message);
+  }
+  return (await res.json()) as User;
+}
+
+/** Drop the custom avatar and fall back to the generated default. */
+export function removeAvatar(): Promise<User> {
+  return del<User>("/users/me/avatar");
+}
+
 /** Server-side Voice & Audio settings (follow the user across devices). */
 export function fetchVoiceSettings(): Promise<VoiceSettings> {
   return get<VoiceSettings>("/users/me/voice-settings");

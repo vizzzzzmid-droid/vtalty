@@ -549,3 +549,20 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   duplicate-subscription bandwidth cost. Regression test:
   `apps/web/tests/screen-self-echo.test.tsx` (9 cases: self audio never
   attached, watch/unwatch are no-ops, remote sharer still works, UI + wiring).
+- User avatars: `PUT/DELETE /api/v1/users/me/avatar` (caller-scoped, so a user
+  can only ever change their own) plus `GET /api/v1/users/:id/avatar`, served
+  over a domain-separated signed URL (`signAvatarUrl` in
+  `uploads/signed-urls.ts`, key derived from `JWT_ACCESS_SECRET`) because an
+  `<img>` cannot send an Authorization header. Uploads reuse the attachment
+  pipeline: magic-byte sniffing (png/jpeg/webp only, so SVG/GIF/HTML are
+  rejected), 2 MB cap, 4096 px source guard, then a `sharp` centre-crop
+  re-encode to a fixed 256x256 PNG (drops EXIF and any smuggled payload)
+  stored under `avatars/<uuid>.png`; rate limited like other uploads.
+  `users.avatarKey` / `avatarMime` hold the storage key - the URL itself is
+  never stored, it is minted per response in `avatarUrlFor()`, so a rotated
+  secret or a deleted avatar invalidates outstanding URLs immediately.
+  A manually set external `avatarUrl` still wins when no upload exists, and
+  clients render the deterministic `GeneratedAvatar` when the field is null.
+  CSP gained `img-src blob:` for the settings preview object URL. Tests:
+  `tests/unit/avatar.test.ts`, avatar cases in `tests/unit/signed-urls.test.ts`,
+  `tests/integration/avatars.test.ts`, `apps/web/tests/avatar-generated.test.tsx`.

@@ -35,6 +35,11 @@ export const users = pgTable("users", {
   username: text("username").notNull().unique(),
   displayName: text("display_name").notNull(),
   avatarUrl: text("avatar_url"),
+  // Custom uploaded avatar: storage key + mime on the user row. The public
+  // avatarUrl handed to clients is a freshly minted signed URL (see
+  // signed-urls.ts) — a stored URL would expire, so only the key is persisted.
+  avatarKey: text("avatar_key"),
+  avatarMime: text("avatar_mime"),
   passwordHash: text("password_hash").notNull(),
   createdAt: createdAt(),
 });

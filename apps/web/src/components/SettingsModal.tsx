@@ -1,31 +1,175 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Tabs from "@radix-ui/react-tabs";
 import { useMutation } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
-import { LogOut, X } from "lucide-react";
+import { useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import { LogOut, Trash2, Upload, X } from "lucide-react";
 import type { ServerState, User } from "@vitality/shared";
 import { queryClient } from "../api/queryClient.js";
-import { patchMe } from "../api/resources.js";
+import {
+  patchMe,
+  removeAvatar,
+  uploadAvatar,
+  validateAvatarFile,
+} from "../api/resources.js";
 import { ApiError } from "../api/http.js";
 import { myAccess } from "../lib/membership.js";
 import { useSessionStore } from "../store/session.js";
 import { useUiStore } from "../store/ui.js";
+import { Avatar } from "./Avatar.js";
 import { ChannelsTab, InvitesTab, MembersTab } from "./AdminTabs.js";
 import { Field, inputClass } from "./ui.js";
 import { VoiceAudioTab } from "./VoiceAudioTab.js";
 
+function AvatarPicker({ user }: { user: User }): React.JSX.Element {
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  // Object URL for the pre-upload preview; revoked on replace/unmount.
+  const [preview, setPreview] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+
+  const applyUser = (updated: User): void => {
+    useSessionStore.setState({ user: updated });
+    void queryClient.invalidateQueries({ queryKey: ["state"] });
+  };
+
+  const upload = useMutation({
+    mutationFn: uploadAvatar,
+    onMutate: () => {
+      setError(null);
+      setStatus("Uploading…");
+    },
+    onSuccess: (updated) => {
+      applyUser(updated);
+      setStatus(null);
+    },
+    onError: (err) => {
+      setStatus(null);
+      setError(err instanceof ApiError ? err.message : "Upload failed");
+    },
+  });
+
+  const remove = useMutation({
+    mutationFn: removeAvatar,
+    onMutate: () => {
+      setError(null);
+      setStatus("Removing…");
+    },
+    onSuccess: (updated) => {
+      applyUser(updated);
+      setStatus(null);
+    },
+    onError: (err) => {
+      setStatus(null);
+      setError(err instanceof ApiError ? err.message : "Failed to remove avatar");
+    },
+  });
+
+  const pick = (event: ChangeEvent<HTMLInputElement>): void => {
+    const file = event.target.files?.[0];
+    // Reset immediately so re-picking the same file fires change again.
+    event.target.value = "";
+    if (file === undefined) {
+      return;
+    }
+    const invalid = validateAvatarFile(file);
+    if (invalid !== null) {
+      setError(invalid);
+      return;
+    }
+    setError(null);
+    if (preview !== null) {
+      URL.revokeObjectURL(preview);
+    }
+    setPreview(URL.createObjectURL(file));
+    upload.mutate(file);
+  };
+
+  const busy = upload.isPending || remove.isPending;
+  const hasCustom = (preview ?? user.avatarUrl ?? null) !== null;
+
+  return (
+    <div className="flex items-center gap-4">
+      <div className="relative">
+        {preview === null ? (
+          <Avatar name={user.displayName || user.username} id={user.id} src={user.avatarUrl} size={64} />
+        ) : (
+          // Plain object-URL preview: not a Next Image, by design.
+          <img
+            src={preview}
+            alt="New avatar preview"
+            className="h-16 w-16 rounded-full object-cover"
+          />
+        )}
+        {busy ? (
+          <span
+            aria-label="Avatar upload in progress"
+            className="absolute inset-0 animate-pulse rounded-full ring-2 [background-color:var(--surface-3)]"
+          />
+        ) : null}
+      </div>
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center gap-2">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            aria-label="Avatar file"
+            className="hidden"
+            onChange={pick}
+          />
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => fileRef.current?.click()}
+            className="flex items-center gap-1.5 rounded px-3 py-1.5 text-sm text-white disabled:opacity-60"
+            style={{ backgroundColor: "var(--accent-strong)" }}
+          >
+            <Upload size={14} aria-hidden="true" />
+            {hasCustom ? "Replace avatar" : "Upload avatar"}
+          </button>
+          {hasCustom ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                if (preview !== null) {
+                  URL.revokeObjectURL(preview);
+                  setPreview(null);
+                }
+                remove.mutate();
+              }}
+              className="flex items-center gap-1.5 rounded px-3 py-1.5 text-sm text-red-400 disabled:opacity-60 hover:[background-color:var(--surface-3)]"
+            >
+              <Trash2 size={14} aria-hidden="true" />
+              Remove avatar
+            </button>
+          ) : null}
+        </div>
+        <p className="text-xs [color:var(--text-muted)]">
+          PNG, JPEG or WebP, up to 2 MB. Resized to 256×256.
+        </p>
+        {status === null ? null : (
+          <p className="text-xs [color:var(--text-muted)]" role="status">
+            {status}
+          </p>
+        )}
+        {error === null ? null : (
+          <p role="alert" className="text-xs text-red-400">
+            {error}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AccountTab({ user }: { user: User }): React.JSX.Element {
   const [displayName, setDisplayName] = useState(user.displayName);
-  const [avatarUrl, setAvatarUrl] = useState(user.avatarUrl ?? "");
   const [error, setError] = useState<string | null>(null);
   const logout = useSessionStore((state) => state.logout);
 
   const save = useMutation({
-    mutationFn: () =>
-      patchMe({
-        displayName: displayName.trim(),
-        avatarUrl: avatarUrl.trim().length > 0 ? avatarUrl.trim() : null,
-      }),
+    mutationFn: () => patchMe({ displayName: displayName.trim() }),
     onSuccess: (updated) => {
       useSessionStore.setState({ user: updated });
       void queryClient.invalidateQueries({ queryKey: ["state"] });
@@ -58,15 +202,8 @@ function AccountTab({ user }: { user: User }): React.JSX.Element {
             onChange={(event) => setDisplayName(event.target.value)}
           />
         </Field>
-        <Field label="Avatar URL (blank = initials)">
-          <input
-            aria-label="Avatar URL"
-            className={inputClass}
-            value={avatarUrl}
-            maxLength={2048}
-            onChange={(event) => setAvatarUrl(event.target.value)}
-            placeholder="https://…"
-          />
+        <Field label="Avatar">
+          <AvatarPicker user={user} />
         </Field>
         {error === null ? null : (
           <p role="alert" className="text-sm text-red-400">

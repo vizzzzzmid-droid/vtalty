@@ -63,7 +63,7 @@ function MemberRow({
   const row = (
     <div className="flex items-center gap-2 rounded px-2 py-1 hover:[background-color:var(--surface-3)]">
       <div className="relative">
-        <Avatar name={name} src={member.user.avatarUrl} size={28} />
+        <Avatar name={name} id={member.user.id} src={member.user.avatarUrl} size={28} />
         <span
           aria-hidden="true"
           className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2"

@@ -20,9 +20,11 @@ import { registerRoleRoutes } from "./modules/roles/routes.js";
 import { registerServerRoutes } from "./modules/servers/routes.js";
 import { registerSettingsRoutes } from "./modules/settings/routes.js";
 import { registerUserRoutes } from "./modules/users/routes.js";
+import { configureAvatarUrlSigner } from "./modules/users/service.js";
 import { registerVoiceRoutes } from "./modules/voice/routes.js";
 import { LocalStorage, type UploadStorage } from "./modules/uploads/storage.js";
 import { registerUploadRoutes } from "./modules/uploads/routes.js";
+import { signAvatarUrl } from "./modules/uploads/signed-urls.js";
 import { registerWsTicketRoutes } from "./modules/ws-tickets/routes.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerGateway } from "./ws/gateway.js";
@@ -106,6 +108,15 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     },
   );
   const storage = deps.storage ?? new LocalStorage(deps.env.UPLOAD_DIR);
+  // Avatar URLs are signed, not stored: mint them on the way out so every
+  // payload (auth, member list, WS) carries a fresh, header-free URL.
+  configureAvatarUrlSigner((userId) =>
+    signAvatarUrl(
+      deps.env.JWT_ACCESS_SECRET,
+      userId,
+      deps.env.ATTACHMENT_URL_TTL_SECONDS,
+    ),
+  );
   const livekit = deps.livekit ?? createLiveKit(deps.env);
   app.decorate("livekit", livekit);
 

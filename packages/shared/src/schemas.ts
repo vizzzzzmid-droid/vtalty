@@ -32,7 +32,9 @@ export const userSchema = z.object({
   id: userIdSchema,
   username: z.string().min(2).max(32),
   displayName: z.string().min(1).max(64),
-  avatarUrl: z.string().url().nullable(),
+  // Uploaded avatars are served from a same-origin signed path (no absolute
+  // host), so accept both a path and an absolute URL.
+  avatarUrl: z.string().min(1).max(2048).nullable(),
 });
 
 export const permissionSchema = z.enum(PERMISSIONS);

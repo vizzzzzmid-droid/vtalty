@@ -125,6 +125,7 @@ export function patch<T>(path: string, body: unknown): Promise<T> {
   return request<T>(path, { method: "PATCH", body: JSON.stringify(body) });
 }
 
-export async function del(path: string): Promise<void> {
+export async function del<T = void>(path: string): Promise<T> {
   await request<undefined>(path, { method: "DELETE" });
+  return undefined as T;
 }

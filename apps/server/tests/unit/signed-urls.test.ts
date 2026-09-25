@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   signAttachmentUrl,
   verifyAttachmentSignature,
+  signAvatarUrl,
+  verifyAvatarSignature,
 } from "../../src/modules/uploads/signed-urls.js";
 
 const SECRET = "unit-test-secret-32-chars-minimum-ok";
@@ -59,3 +61,45 @@ describe("attachment signed URLs", () => {
     expect(verifyAttachmentSignature(SECRET, ATTACHMENT_ID, 1.5, s, NOW)).toBe(false);
   });
 });
+
+describe("avatar signed URLs", () => {
+  it("roundtrips: a freshly signed URL verifies", () => {
+    const url = signAvatarUrl(SECRET, ATTACHMENT_ID, 3600, NOW);
+    expect(url.startsWith(`/api/v1/users/${ATTACHMENT_ID}/avatar?e=`)).toBe(true);
+    const { e, s } = parse(url);
+    expect(verifyAvatarSignature(SECRET, ATTACHMENT_ID, e, s, NOW)).toBe(true);
+  });
+
+  it("rejects a tampered signature and a foreign user id", () => {
+    const { e, s } = parse(signAvatarUrl(SECRET, ATTACHMENT_ID, 3600, NOW));
+    expect(verifyAvatarSignature(SECRET, ATTACHMENT_ID, e, "AAAA", NOW)).toBe(false);
+    expect(verifyAvatarSignature(SECRET, OTHER_ID, e, s, NOW)).toBe(false);
+  });
+
+  it("rejects expired URLs and foreign secrets", () => {
+    const signedAt = new Date(NOW.getTime() - 2 * 3600 * 1000);
+    const { e, s } = parse(signAvatarUrl(SECRET, ATTACHMENT_ID, 3600, signedAt));
+    expect(verifyAvatarSignature(SECRET, ATTACHMENT_ID, e, s, NOW)).toBe(false);
+    const fresh = parse(signAvatarUrl(SECRET, ATTACHMENT_ID, 3600, NOW));
+    expect(verifyAvatarSignature(OTHER_SECRET, ATTACHMENT_ID, fresh.e, fresh.s, NOW)).toBe(
+      false,
+    );
+  });
+
+  it("rejects non-integer expiry values", () => {
+    const { s } = parse(signAvatarUrl(SECRET, ATTACHMENT_ID, 3600, NOW));
+    expect(verifyAvatarSignature(SECRET, ATTACHMENT_ID, Number.NaN, s, NOW)).toBe(false);
+  });
+
+  it("does not accept an attachment signature as an avatar signature", () => {
+    // Domain separation: replaying a capability URL across the two endpoints
+    // must fail even for the same id/expiry.
+    const { e, s } = parse(signAttachmentUrl(SECRET, ATTACHMENT_ID, 3600, NOW));
+    expect(verifyAvatarSignature(SECRET, ATTACHMENT_ID, e, s, NOW)).toBe(false);
+    const avatar = parse(signAvatarUrl(SECRET, ATTACHMENT_ID, 3600, NOW));
+    expect(
+      verifyAttachmentSignature(SECRET, ATTACHMENT_ID, avatar.e, avatar.s, NOW),
+    ).toBe(false);
+  });
+});
+

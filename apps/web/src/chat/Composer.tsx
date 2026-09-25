@@ -5,6 +5,7 @@ import type { MemberWithUser, MessageAttachment } from "@vitality/shared";
 import { ApiError } from "../api/http.js";
 import { sendMessage, uploadAttachments } from "../api/resources.js";
 import { displayNameOf } from "../lib/format.js";
+import { Avatar } from "../components/Avatar.js";
 import { sendTyping } from "../ws/socket.js";
 
 const MENTION_TOKEN_RE = /@([A-Za-z0-9_.-]*)$/;
@@ -163,6 +164,12 @@ export function Composer({
                   index === mentionIndex ? "[background-color:var(--surface-3)]" : ""
                 }`}
               >
+                <Avatar
+                  name={displayNameOf(member.user.displayName, member.user.username)}
+                  id={member.user.id}
+                  src={member.user.avatarUrl}
+                  size={20}
+                />
                 <span className="font-medium">
                   {displayNameOf(member.user.displayName, member.user.username)}
                 </span>
