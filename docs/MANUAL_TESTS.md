@@ -78,6 +78,12 @@ home Wi-Fi), both logged in, both in the same voice channel.
         sinkId). Headless equivalent: `pnpm --filter @vitality/desktop
         probe:audio-boost` (fake mic, measures the graph and the element
         output; needs the system Edge channel).
+  - [ ] Boost self-heal (fix 1d75b16): set a participant to 400%, reload the
+        page, then drag the slider down through 200% / 100% / 50% / 0% -
+        every step changes the loudness immediately (no dead zone, no
+        reload needed); while boosted the participant keeps sounding at all
+        (a muted keeper element feeds the original stream) and 0% stays a
+        true mute.
 - [ ] Viewer opt-in: without clicking Watch, B receives no screen bytes
       (check `chrome://webrtc-internals`: no video inbound-rtp for the
       screen SSRC); Stop watching cuts the bytes again.

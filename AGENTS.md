@@ -36,7 +36,7 @@
   fullscreen overlay (native Fullscreen API removed), and the silent
   screen-share audio root cause is fixed (visually-hidden audio element
   instead of `display:none` + suspended upmix AudioContext resume +
-  gesture unlock). Follow-up fix (3c55680): audio played LEFT-EAR-ONLY in one ear - a ChannelMergerNode maps input N to output channel N and bare `connect(merger)` fed input 0 (left) only; both upmix sites (screen.ts, chain.ts) now feed BOTH inputs, stereo sources keep L/R via ChannelSplitter, and chain.ts's dead mono detection (`gain.channelCount === 1` is never true) now reads the track's `getSettings().channelCount`; all TEMP-DEBUG(screen-audio) logging removed. Follow-up feature (8bc23b1): per-user + per-stream volume BOOST to 400% - native element.volume/LiveKit setVolume cap at 100%, so past 100% elements are rerouted through a WebAudio GainNode (boost.ts, lazy: <=100% stays native). That boost was inaudible in production and is FIXED in fc7cf5a: createMediaElementSource returns silence for srcObject MediaStreams (measured, see §7), so the boost now taps the stream via createMediaStreamSource -> GainNode -> MediaStreamDestination -> element.srcObject. STOP after reporting, wait for "continue".
+  gesture unlock). Follow-up fix (3c55680): audio played LEFT-EAR-ONLY in one ear - a ChannelMergerNode maps input N to output channel N and bare `connect(merger)` fed input 0 (left) only; both upmix sites (screen.ts, chain.ts) now feed BOTH inputs, stereo sources keep L/R via ChannelSplitter, and chain.ts's dead mono detection (`gain.channelCount === 1` is never true) now reads the track's `getSettings().channelCount`; all TEMP-DEBUG(screen-audio) logging removed. Follow-up feature (8bc23b1): per-user + per-stream volume BOOST to 400% - native element.volume/LiveKit setVolume cap at 100%, so past 100% elements are rerouted through a WebAudio GainNode (boost.ts, lazy: <=100% stays native). That boost was inaudible in production and is FIXED in fc7cf5a: createMediaElementSource returns silence for srcObject MediaStreams (measured, see §7), so the boost now taps the stream via createMediaStreamSource -> GainNode -> MediaStreamDestination -> element.srcObject. Follow-up fix (1d75b16): the slider could still go dead in production - a boost node armed while the AudioContext was suspended was never swapped in (every later slider move wrote an orphaned GainNode while the element kept playing its original stream), Chromium drops a WebRTC stream once nothing consumes it (the graph's own MediaStreamSourceNode does not count), and a re-attached srcObject silently detached the gain; boost.ts now self-heals on every apply (statechange flush + resume retry + drift re-tap), keeps native element.volume carrying <=100% until the swap happens (a <=100% request on a never-activated node releases the graph entirely), and attaches a muted keeper element feeding the original stream while boosted (see §7). STOP after reporting, wait for "continue".
 - Repo root moved to `vitality/` (clean dir; parent `Default Project` holds
   unrelated files). All paths below are relative to `vitality/`.
 - Local toolchain (this Windows machine): Node 24.19 + pnpm 9.15.0 via
@@ -428,6 +428,31 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   routing and the srcObject swap (web 77/77); lint/test/build/`-r typecheck`
   green locally. All TEMP `[vol-debug]` logging removed. Live loudness/mute
   check stays manual (docs/MANUAL_TESTS.md volume-boost row).
+- [x] Post-6b fix - the volume slider stayed dead for listeners (commit
+  1d75b16). Report: audio plays but dragging the per-user slider (0..100%)
+  changes nothing. Reproduced against real Chromium/Edge 153 (headed AND
+  headless, default autoplay policies, constant-tone WebRTC loopback so the
+  fake-mic beep timing could not skew analyser peaks) - three ways the
+  fc7cf5a path ends up half-wired: (1) a boost created while the
+  AudioContext is suspended armed the gain but never swapped the element,
+  and every later slider move wrote into an orphaned GainNode while the
+  element kept playing its original stream at 100%; (2) Chromium stops
+  delivering a WebRTC remote stream once NOTHING consumes it - the boost
+  graph's own MediaStreamSourceNode does NOT count - so after the swap the
+  graph input, the graph output and the element all went silent (measured:
+  no consumer -> peak 0, second consumer -> peak 1); (3) a re-attached
+  srcObject (LiveKit re-subscribe / stream-tile cleanup) silently detached
+  the gain. Fix (boost.ts): every apply runs syncBoost, which re-taps a
+  replaced stream and swaps the element back (drift), defers the swap with a
+  `statechange` flush + resume retry when the context is suspended while
+  native element.volume keeps carrying <=100%, and releases the graph
+  entirely on a <=100% request to a never-activated node so the slider always
+  moves the real volume; while a boost is active a muted hidden keeper
+  element keeps the original stream fed. Probe gained a keeper phase
+  (no-consumer peak 0 -> keeper 1/2/0), 14/14 PASS via
+  `pnpm --filter @vitality/desktop probe:audio-boost`; new wiring pins in
+  tests/boost.test.ts (web 78/78); lint/test/build/`-r typecheck` green.
+  Live slider check stays manual (docs/MANUAL_TESTS.md volume-boost row).
 ## 8. Known issues / risks
 
 - `@sapphi-red/web-noise-suppressor` 0.4.1 (MIT) verified with the Vite 8
