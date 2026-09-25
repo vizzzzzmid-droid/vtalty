@@ -167,8 +167,22 @@ function publicationsOf(identity: string): ScreenPublications | null {
   return null;
 }
 
+/**
+ * True when `identity` is the local participant. LiveKit never auto-subscribes
+ * a publisher to their own tracks, so any explicit watch/attach against the
+ * local identity is our own bug: the sharer would hear their own screen-share
+ * audio played back to them (self-echo) and pay for the extra subscriptions.
+ */
+export function isSelfIdentity(identity: string): boolean {
+  const room = getRoom();
+  return room !== null && room.localParticipant.identity === identity;
+}
+
 /** Opt in: subscribe to a sharer's screen tracks (video + audio). */
 export function watchStream(identity: string): void {
+  if (isSelfIdentity(identity)) {
+    return;
+  }
   const publications = publicationsOf(identity);
   const deafened = useVoiceConnection.getState().selfDeafened;
   const volumes = useVoiceSettings.getState().streamVolumes;
@@ -184,6 +198,9 @@ export function watchStream(identity: string): void {
 
 /** Opt out: unsubscribe (bandwidth stops immediately). */
 export function unwatchStream(identity: string): void {
+  if (isSelfIdentity(identity)) {
+    return;
+  }
   const publications = publicationsOf(identity);
   publications?.video?.setSubscribed(false);
   publications?.audio?.setSubscribed(false);
@@ -227,6 +244,9 @@ export function attachStreamVideo(
   identity: string,
   element: HTMLVideoElement,
 ): () => void {
+  if (isSelfIdentity(identity)) {
+    return () => undefined;
+  }
   const track = publicationsOf(identity)?.video?.track;
   if (track === undefined || track === null) {
     return () => undefined;
@@ -256,6 +276,11 @@ export function attachStreamAudio(
   identity: string,
   element: HTMLAudioElement,
 ): () => void {
+  // Self-echo guard: never register or attach the sharer's OWN screen audio on
+  // the sharer's client (LiveKit would not deliver it anyway).
+  if (isSelfIdentity(identity)) {
+    return () => undefined;
+  }
   installAudioUnlockListeners();
   trackStreamAudioElement(identity, element);
   resumeStreamAudioContext();

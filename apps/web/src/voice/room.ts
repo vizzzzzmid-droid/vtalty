@@ -200,6 +200,12 @@ function attachHandlers(next: Room, LK: LiveKitModule): void {
     LK.RoomEvent.TrackSubscribed,
     (track: Track, _publication: unknown, participant: Participant) => {
       const publication = _publication as RemoteTrackPublication;
+      // Self-echo guard: LiveKit does not subscribe a publisher to their own
+      // tracks, so a local participant here is a spurious event — never let it
+      // touch our DOM (attaching our own screen audio would echo it back).
+      if (participant.isLocal) {
+        return;
+      }
       const watching = snapshot().watching[participant.identity] !== undefined;
       const isScreenVideo =
         track.kind === LK.Track.Kind.Video &&

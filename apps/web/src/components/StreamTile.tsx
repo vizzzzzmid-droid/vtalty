@@ -6,6 +6,7 @@ import {
   attachStreamAudio,
   attachStreamVideo,
   isDegradedQuality,
+  isSelfIdentity,
   setStreamQuality,
   setStreamVolume,
   sharerQuality,
@@ -28,11 +29,18 @@ export function StreamTile({
   sharerId,
   sharerName,
   sharerAvatarUrl,
+  isSelf = false,
 }: {
   sharerId: string;
   sharerName: string;
   sharerAvatarUrl?: string | null;
+  /** True when this tile is the local user's own share. Self-shares render
+   *  no "Watch stream" control: watching yourself is a self-echo, and
+   *  screen.ts also hard-blocks it. */
+  isSelf?: boolean;
 }): React.JSX.Element {
+  // Defensive: even if a caller forgets isSelf, never watch/attach ourselves.
+  const self = isSelf || isSelfIdentity(sharerId);
   const watching = useVoiceConnection((state) => state.watching[sharerId]);
   const startWatching = useVoiceConnection((state) => state.startWatching);
   const stopWatching = useVoiceConnection((state) => state.stopWatching);
@@ -49,7 +57,7 @@ export function StreamTile({
   // (Re)attach loop while watching: tracks may arrive after the click.
   // Runs again when the overlay opens so its video element gets the track.
   useEffect(() => {
-    if (watching === undefined) {
+    if (watching === undefined || self) {
       return undefined;
     }
     watchStream(sharerId);
@@ -71,7 +79,7 @@ export function StreamTile({
       clearInterval(timer);
       unwatchStream(sharerId);
     };
-  }, [watching, sharerId, fullscreen]);
+  }, [watching, sharerId, fullscreen, self]);
 
   useEffect(() => {
     void setStreamVolume(sharerId, muted ? 0 : streamVolume);
@@ -101,7 +109,7 @@ export function StreamTile({
     void setStreamVolume(sharerId, muted ? 0 : next);
   };
 
-  if (watching === undefined) {
+  if (watching === undefined || self) {
     return (
       <div className="flex flex-col overflow-hidden rounded-lg ring-1 ring-white/5 [background-color:var(--surface-2)]">
         <div className="relative flex aspect-video flex-col items-center justify-center gap-2 bg-black/50 px-3">
@@ -114,8 +122,9 @@ export function StreamTile({
           </span>
           <Avatar name={sharerName} src={sharerAvatarUrl ?? null} size={40} />
           <span className="max-w-full truncate text-sm [color:var(--text-muted)]">
-            {sharerName} is sharing their screen
+            {self ? "You are sharing" : `${sharerName} is sharing their screen`}
           </span>
+          {self ? null : (
           <button
             type="button"
             onClick={() => startWatching(sharerId)}
@@ -124,6 +133,7 @@ export function StreamTile({
           >
             Watch stream
           </button>
+          )}
         </div>
       </div>
     );

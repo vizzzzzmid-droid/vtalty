@@ -9,9 +9,12 @@ import { StreamTile } from "./StreamTile.js";
 export function MainView({
   channel,
   state,
+  myUserId,
 }: {
   channel: Channel | null;
   state: ServerState | null;
+  /** Local user id, so the sharer's own tile is marked (no self-watch). */
+  myUserId: string;
 }): React.JSX.Element {
   if (channel === null) {
     return (
@@ -60,6 +63,7 @@ export function MainView({
               sharerId={entry.userId}
               sharerName={sharerDisplayName(byId, entry.userId)}
               sharerAvatarUrl={byId.get(entry.userId)?.user.avatarUrl ?? null}
+              isSelf={entry.userId === myUserId}
             />
           ))}
         </div>

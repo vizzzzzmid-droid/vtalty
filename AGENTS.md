@@ -536,3 +536,16 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   fixed 800 ms wait) flaked once in CI (run 35725467497 attempt 1,
   2026-09-22); passed on rerun and locally. If it recurs, replace the
   fixed sleep with a poll-with-deadline assertion.
+- Screen-share self-echo, fixed: the sharer heard their OWN screen audio
+  because nothing compared the tile identity against the local participant
+  (LiveKit never auto-subscribes a publisher, so any explicit watch/attach on
+  the local identity is our bug). Guards: `isSelfIdentity()` in
+  `apps/web/src/voice/screen.ts` short-circuits `watchStream`,
+  `unwatchStream`, `attachStreamVideo` and `attachStreamAudio`; `StreamTile`
+  takes `isSelf` (auto-detected via `isSelfIdentity`) and renders
+  "You are sharing" with no Watch button; `MainView` now takes `myUserId`;
+  `room.ts` `TrackSubscribed` bails on `participant.isLocal`. This also
+  explains any "I hear my own system audio twice / echo" complaints, and the
+  duplicate-subscription bandwidth cost. Regression test:
+  `apps/web/tests/screen-self-echo.test.tsx` (9 cases: self audio never
+  attached, watch/unwatch are no-ops, remote sharer still works, UI + wiring).

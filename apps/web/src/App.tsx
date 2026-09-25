@@ -289,7 +289,7 @@ function Shell(): React.JSX.Element {
                   myUserId={user.id}
                 />
               ) : (
-                <MainView channel={channel} state={state} />
+                <MainView channel={channel} state={state} myUserId={user.id} />
               )}
               <div className="hidden md:flex">
                 <MemberList state={state} myUserId={user.id} />
