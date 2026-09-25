@@ -1,6 +1,17 @@
 # Static file server for the vitality web bundle (behind the main Caddy).
 :80 {
 	root * /srv/web
+
+	# The SPA shell must never be cached: it points at the hashed asset
+	# bundles, so a cached index.html pins the client to an old build
+	# (we shipped a fix and the browser kept serving the previous one).
+	@index path /
+	header @index Cache-Control "no-store, must-revalidate"
+
+	# Hashed assets are immutable - safe to cache forever.
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+
 	try_files {path} /index.html
 	file_server
 }
