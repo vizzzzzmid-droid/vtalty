@@ -45,6 +45,8 @@ export function GeneratedAvatar({
       data-testid="generated-avatar"
       className="flex shrink-0 items-center justify-center overflow-hidden rounded-full font-semibold"
       style={{
+        display: "flex",
+        flexShrink: 0,
         width: size,
         height: size,
         fontSize: Math.max(10, Math.round(size * 0.4)),
@@ -71,14 +73,18 @@ export function Avatar({
 }): React.JSX.Element {
   return (
     <AvatarPrimitive.Root
-      className="shrink-0 overflow-hidden rounded-full"
-      style={{ width: size, height: size }}
+      // Root renders a <span>, which is an inline box where width/height are
+      // ignored - that made the <img> inside fall back to its intrinsic 256px
+      // size. `block` must therefore be inlined, not just put in className,
+      // so the sizing cannot be lost by class order or CSS resets.
+      className="block shrink-0 overflow-hidden rounded-full"
+      style={{ display: "block", width: size, height: size, flexShrink: 0 }}
     >
       {src === null || src === undefined || src.length === 0 ? null : (
         <AvatarPrimitive.Image
           src={src}
           alt={`${name} avatar`}
-          className="h-full w-full object-cover"
+          className="block h-full w-full object-cover"
         />
       )}
       <AvatarPrimitive.Fallback asChild>
