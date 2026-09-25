@@ -19,6 +19,11 @@
  *   createMediaStreamSource(remoteStream)   peak 1.00  ← what we ship now
  *   rendered (element.captureStream) with the graph handed to srcObject:
  *     gain 1 -> 1.00, gain 2 -> 2.00, gain 0 -> 0.00 (true mute)
+ *   phase 5 (keeper): with the ONLY natural consumer of the remote stream
+ *     removed, Chromium stops delivering it (the graph's own
+ *     MediaStreamSourceNode does not count) until a muted hidden keeper
+ *     element — what boost.ts attaches — plays the stream again:
+ *     gain 1 -> signal, gain 2 -> ~2x, gain 0 -> 0
  *
  * Usage (from apps/desktop, needs @playwright/test + the system Edge channel):
  *   node scripts/audio-boost-probe.mjs
@@ -180,6 +185,32 @@ const PROBE = async () => {
       : null;
   log("element-render-done", out.rendered_gain1, out.rendered_gain2, out.rendered_gain0);
 
+  // 5. Resilience (what boost.ts now ships): drop the natural consumer of the
+  //    remote stream. Chromium then stops delivering it — the graph's own
+  //    MediaStreamSourceNode does not count — until a muted hidden "keeper"
+  //    element plays the stream again.
+  log("keeper");
+  el.srcObject = null;
+  el.pause();
+  await sleep(1500);
+  gain.gain.value = 1;
+  await sleep(300);
+  out.no_keeper_graph_peak = await tap(dest.stream, 800);
+  const keeper = document.createElement("audio");
+  keeper.muted = true;
+  keeper.autoplay = true;
+  keeper.srcObject = remote;
+  document.body.appendChild(keeper);
+  await sleep(1500);
+  out.keeper_gain1 = await tap(dest.stream, 1200);
+  gain.gain.value = 2;
+  await sleep(300);
+  out.keeper_gain2 = await tap(dest.stream, 1200);
+  gain.gain.value = 0;
+  await sleep(300);
+  out.keeper_gain0 = await tap(dest.stream, 1200);
+  log("keeper-done", out.no_keeper_graph_peak, out.keeper_gain1, out.keeper_gain2, out.keeper_gain0);
+
   return out;
 };
 
@@ -244,6 +275,17 @@ const checks = [
   ["element renders the graph output", out.rendered_gain1 > 0.05, `${out.rendered_gain1} (${out.rendered_tracks} track)`],
   ["element render scales with the boost", out.rendered_ratio !== null && near(out.rendered_ratio, 2, 0.6), out.rendered_ratio],
   ["element render at 0% is silent", out.rendered_gain0 === 0, out.rendered_gain0],
+  [
+    "muted keeper element keeps the boost graph fed",
+    out.keeper_gain1 > 0.05,
+    `${out.keeper_gain1} (no keeper: ${out.no_keeper_graph_peak})`,
+  ],
+  [
+    "kept graph scales with the boost",
+    out.keeper_gain2 > 0.05 && near(out.keeper_gain2, 2 * out.keeper_gain1, 0.6),
+    `${out.keeper_gain2} vs 2×${out.keeper_gain1}`,
+  ],
+  ["kept graph mutes at 0%", out.keeper_gain0 === 0, out.keeper_gain0],
 ];
 
 console.log(JSON.stringify(out, null, 2));

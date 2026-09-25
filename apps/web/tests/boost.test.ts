@@ -49,11 +49,39 @@ describe("volume boost wiring (up to 400%)", () => {
     expect(boostSource).toContain("ctx.createMediaStreamDestination()");
     // The graph output goes back into the element, so its own renderer keeps
     // the user's output device and its autoplay state.
-    expect(boostSource).toContain("element.srcObject = dest.stream;");
+    expect(boostSource).toContain("element.srcObject = node.output;");
     // Only reroute while the context runs (a suspended one plays silence).
     expect(boostSource).toContain('ctx.state === "running"');
     // Native element.volume is kept as the ≤100% fast path.
     expect(boostSource).toContain("element.volume = clamped;");
+  });
+
+  it("boost survives suspended contexts, stream drift and dead inputs", () => {
+    // The swap is retried (statechange flush + every apply) instead of being
+    // armed once: a boost created while the AudioContext was suspended used
+    // to leave the element half-wired — the gain existed but every slider
+    // move hit a GainNode the element was never attached to.
+    expect(boostSource).toContain('addEventListener("statechange"');
+    expect(boostSource).toContain("pendingActivations");
+    expect(boostSource).toContain("syncBoost(element, existing)");
+    // Until the swap happens ≤100% keeps moving the real element.volume...
+    expect(boostSource).toContain(
+      "element.volume = Math.min(1, node.gain.gain.value);",
+    );
+    // ...and a ≤100% request on a never-activated node releases the graph
+    // entirely instead of writing into an orphaned GainNode.
+    expect(boostSource).toMatch(
+      /releaseElementVolume\(element\);\r?\n    element\.volume = clamped;/,
+    );
+    // A replaced srcObject (LiveKit re-attach / tile cleanup) is re-tapped
+    // and the element is swapped back onto the graph output.
+    expect(boostSource).toContain("retapInput(node, current);");
+    // Chromium stops delivering a WebRTC stream nothing consumes — the
+    // graph's own MediaStreamSourceNode does not count — so a muted hidden
+    // keeper element plays the original stream while the boost is active.
+    expect(boostSource).toContain("keeper.muted = true;");
+    expect(boostSource).toContain("document.body.appendChild(keeper);");
+    expect(boostSource).toContain("node.keeper.remove();");
   });
 
   it("per-user voice volume no longer relies on LiveKit setVolume", () => {
