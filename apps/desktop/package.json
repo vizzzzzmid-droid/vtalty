@@ -19,7 +19,8 @@
     "dev": "node scripts/dev.mjs",
     "dist": "node scripts/dist.mjs",
     "pack": "electron-builder --dir",
-    "test:electron": "playwright test --config playwright.config.ts"
+    "test:electron": "playwright test --config playwright.config.ts",
+    "probe:audio-boost": "node scripts/audio-boost-probe.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",

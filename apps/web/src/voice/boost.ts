@@ -3,17 +3,28 @@
  *
  * HTMLMediaElement.volume (and LiveKit's participant.setVolume) top out at
  * 1.0 = 100%. To let users push a quiet speaker or stream up to MAX_VOLUME
- * (400%), the element is rerouted through a WebAudio GainNode:
- * createMediaElementSource(element) → GainNode(0..MAX_VOLUME) → destination.
+ * (400%), the element's MediaStream is rerouted through a WebAudio GainNode:
+ * createMediaStreamSource(element.srcObject) → GainNode(0..MAX_VOLUME) →
+ * MediaStreamAudioDestinationNode → element.srcObject.
  *
- * The reroute is LAZY: elements at ≤100% keep the native element.volume
- * path (no AudioContext needed, no autoplay-policy risk). Once a boost past
- * 100% is requested, the element becomes permanently gain-controlled (a
- * MediaElementSource cannot be reverted to direct output): element.volume is
- * fixed at 1 and the GainNode carries the 0..MAX_VOLUME value.
+ * Why not createMediaElementSource (the first attempt, commit 8bc23b1)? It was
+ * measured in Chromium 153 (fake mic + RTCPeerConnection loopback): an element
+ * whose srcObject is a MediaStream — i.e. every remote LiveKit track and every
+ * stream-tile element fed from an upmix destination — delivers SILENCE through
+ * MediaElementAudioSourceNode while the element keeps playing directly. The
+ * gain therefore moved no audible samples at all and the 0..400% slider did
+ * nothing. Tapping the MediaStream itself yields full-level samples, and the
+ * graph output is handed back to the element so its own renderer keeps the
+ * user's chosen output device and its autoplay state.
+ *
+ * The reroute is LAZY: elements at ≤100% keep the native element.volume path
+ * (no AudioContext needed, no autoplay-policy risk). Once a boost past 100% is
+ * requested the element becomes gain-controlled: element.volume is fixed at 1
+ * and the GainNode carries the 0..MAX_VOLUME value.
  *
  * The shared AudioContext resumes on the first user gesture (pointerdown /
- * keydown) — the same autoplay dance as the screen-share upmix context.
+ * keydown). A suspended context would make a rerouted element play silence, so
+ * the srcObject swap waits until the context actually runs.
  */
 
 /** Maximum listen-volume multiplier (400%). */
@@ -45,7 +56,6 @@ function playbackContext(): AudioContext | null {
   if (sharedContext.state === "suspended") {
     void sharedContext.resume();
   }
-  console.info("[vol-debug] boost ctx state:", sharedContext.state);
   return sharedContext;
 }
 
@@ -64,11 +74,24 @@ function installUnlockListeners(): void {
 }
 
 interface BoostNode {
-  source: MediaElementAudioSourceNode;
+  source: MediaStreamAudioSourceNode;
   gain: GainNode;
+  /** The element's original stream, restored when the boost is released. */
+  input: MediaStream;
+  /** Graph output handed to the element while the boost is active. */
+  output: MediaStream;
 }
 
 const boosts = new WeakMap<HTMLMediaElement, BoostNode>();
+
+/** Kick playback after the element has been switched onto the boost graph. */
+function tryPlay(element: HTMLMediaElement): void {
+  try {
+    void element.play().catch(() => undefined);
+  } catch {
+    // Autoplay blocked; the unlock listeners retry on the next gesture.
+  }
+}
 
 /** Apply a 0..MAX_VOLUME listen volume to a media element (lazy WebAudio). */
 export function applyElementVolume(element: HTMLMediaElement, volume: number): void {
@@ -76,44 +99,52 @@ export function applyElementVolume(element: HTMLMediaElement, volume: number): v
   const existing = boosts.get(element);
   if (existing !== undefined) {
     existing.gain.gain.value = clamped;
-    console.info(
-      "[vol-debug] boost: existing gain =", clamped,
-      "ctx.state:", existing.gain.context.state,
-    );
     return;
   }
   if (clamped <= 1) {
     // Native path: never-boosted elements need no AudioContext at all.
     element.volume = clamped;
-    console.info("[vol-debug] boost: native element.volume =", clamped);
     return;
   }
   const ctx = playbackContext();
   if (ctx === null) {
     // No WebAudio available: fall back to full native volume (100%).
     element.volume = 1;
-    console.info("[vol-debug] boost: NO AudioContext -> fallback element.volume = 1");
+    return;
+  }
+  const input = element.srcObject;
+  if (!(input instanceof MediaStream)) {
+    // Nothing to tap (plain src= media): 100% is the best we can do.
+    element.volume = 1;
     return;
   }
   try {
-    const source = ctx.createMediaElementSource(element);
+    const source = ctx.createMediaStreamSource(input);
     const gain = ctx.createGain();
     gain.gain.value = clamped;
+    const dest = ctx.createMediaStreamDestination();
     source.connect(gain);
-    gain.connect(ctx.destination);
-    boosts.set(element, { source, gain });
-    // The GainNode carries the volume from now on.
+    gain.connect(dest);
+    boosts.set(element, { source, gain, input, output: dest.stream });
+    // Hand the graph output back to the element. Only do it while the context
+    // runs: a suspended context would feed the element a silent stream.
+    const activate = (): void => {
+      const node = boosts.get(element);
+      if (node === undefined || node.gain !== gain) {
+        return; // Released (detached) meanwhile.
+      }
+      // The GainNode carries the volume from now on.
+      element.volume = 1;
+      element.srcObject = dest.stream;
+      tryPlay(element);
+    };
+    if (ctx.state === "running") {
+      activate();
+    } else {
+      void ctx.resume().then(activate, () => undefined);
+    }
+  } catch {
     element.volume = 1;
-    console.info(
-      "[vol-debug] boost: CREATED gain =", clamped,
-      "ctx.state:", ctx.state,
-      "srcObject:", element.srcObject !== null,
-      "paused:", element.paused,
-      "muted:", element.muted,
-    );
-  } catch (err) {
-    element.volume = 1;
-    console.info("[vol-debug] boost: createMediaElementSource FAILED:", err);
   }
 }
 
@@ -129,6 +160,10 @@ export function releaseElementVolume(element: HTMLMediaElement): void {
     node.gain.disconnect();
   } catch {
     // Context already gone.
+  }
+  // Put the element back on its own stream when it outlives the boost node.
+  if (element.srcObject === node.output) {
+    element.srcObject = node.input;
   }
   element.volume = 1;
 }

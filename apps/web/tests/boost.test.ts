@@ -39,9 +39,19 @@ describe("volume boost wiring (up to 400%)", () => {
     expect(MAX_VOLUME).toBe(4);
   });
 
-  it("boosts past 100% through a MediaElementSource + GainNode", () => {
-    expect(boostSource).toContain("createMediaElementSource(element)");
-    expect(boostSource).toContain("gain.connect(ctx.destination)");
+  it("boosts past 100% by tapping the element's MediaStream", () => {
+    // Regression guard: MediaElementAudioSourceNode delivers SILENCE for
+    // elements whose srcObject is a MediaStream (measured in Chromium 153 with
+    // a fake mic + RTCPeerConnection loopback) while the element keeps playing
+    // directly — the whole 0..400% boost was inaudible because of it.
+    expect(boostSource).not.toContain("ctx.createMediaElementSource");
+    expect(boostSource).toContain("createMediaStreamSource(input)");
+    expect(boostSource).toContain("ctx.createMediaStreamDestination()");
+    // The graph output goes back into the element, so its own renderer keeps
+    // the user's output device and its autoplay state.
+    expect(boostSource).toContain("element.srcObject = dest.stream;");
+    // Only reroute while the context runs (a suspended one plays silence).
+    expect(boostSource).toContain('ctx.state === "running"');
     // Native element.volume is kept as the ≤100% fast path.
     expect(boostSource).toContain("element.volume = clamped;");
   });

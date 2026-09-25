@@ -114,7 +114,6 @@ function applyAllVolumes(): void {
 }
 
 export function applyUserVolume(userId: string, volume: number): void {
-  console.info("[vol-debug] applyUserVolume", userId, volume);
   setRemoteAudioVolume(userId, volume);
 }
 
