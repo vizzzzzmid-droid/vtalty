@@ -506,8 +506,9 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   covered by `docs/MANUAL_TESTS.md`. The CI `e2e-voice` job is
   `continue-on-error` (experimental) until it proves green.
 - `ci` + `desktop` workflows GREEN on main (runs 35976612008/35976612056,
-  2026-09-24, latest: d7f5e2c docs + fc7cf5a MediaStream-tap boost fix,
-  2026-09-25 runs 36135508994/36135508920 and 36135452908/36135452709):
+  2026-09-24, latest: 1d75b16 self-healing slider fix + 447742b docs,
+  2026-09-25 runs 36142518415/36142518474; earlier 2026-09-25
+  d7f5e2c/fc7cf5a runs 36135508994/36135508920 and 36135452908/36135452709):
   lint-typecheck-unit-build, integration (51/51), compose, e2e (3/3),
   stack-smoke full pass incl. native RTC join/publish/presence,
   backup/restore and restart-reconcile, NSIS + AppImage + Electron smoke.
