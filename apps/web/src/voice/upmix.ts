@@ -35,16 +35,39 @@ export interface CenteredStream {
   release: () => void;
 }
 
-/** True when the track reports fewer than 2 channels. */
+/**
+ * True when the track should be treated as mono and therefore centred.
+ *
+ * An UNREPORTED channelCount counts as mono on purpose. LiveKit's SFU always
+ * hands subscribers a mono Opus track unless stereo was explicitly negotiated,
+ * and a freshly attached remote track reports its channelCount only once
+ * playback has started — waiting for it left the voice in one ear for the
+ * whole call. The failure modes are not symmetric: wrongly centring a truly
+ * stereo source just folds it to a centred mono (still perfectly audible),
+ * whereas never centring the common mono case is the bug being fixed.
+ * A track that positively reports 2+ channels is left completely alone.
+ */
 export function isMonoTrack(track: MediaStreamTrack | null | undefined): boolean {
   if (track === null || track === undefined) {
     return false;
   }
   try {
     const count = track.getSettings().channelCount;
-    // Undefined channelCount means unknown: leave it alone rather than
-    // needlessly reroute a possibly-stereo source.
-    return count === 1;
+    return count === undefined || count === 1;
+  } catch {
+    // Settings unreadable: treat as mono, the SFU default.
+    return true;
+  }
+}
+
+/** True when the track positively reports more than one channel. */
+export function isStereoTrack(track: MediaStreamTrack | null | undefined): boolean {
+  if (track === null || track === undefined) {
+    return false;
+  }
+  try {
+    const count = track.getSettings().channelCount;
+    return count !== undefined && count > 1;
   } catch {
     return false;
   }

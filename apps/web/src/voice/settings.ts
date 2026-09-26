@@ -23,10 +23,28 @@ import { persist, createJSONStorage } from "zustand/middleware";
  */
 export const MIC_PUBLISH_OPTIONS = {
   audioPreset: { maxBitrate: 64000 },
+  // livekit-client FORCE-disables both for stereo tracks when they are
+  // undefined (verified in livekit-client 2.22.3), so they must be explicit.
   dtx: true,
   red: true,
-  /** A voice track is never negotiated as stereo Opus. */
-  forceStereo: false,
+  /**
+   * Publish STEREO, and this is the fix for "voice only in the left ear".
+   *
+   * The SFU always hands subscribers a MONO Opus track, and a mono track in
+   * an <audio> element feeds channel 0 only — the voice lands in one ear. The
+   * publisher-side ChannelMerger in chain.ts cannot fix that, because with
+   * `forceStereo: false` livekit-client still negotiates Opus as MONO and
+   * throws the upmix away. Centring had therefore been attempted on the
+   * RECEIVING side (upmix.ts), which is unreliable: a fresh WebRTC track
+   * usually reports no `channelCount` at attach time, so the centring was
+   * skipped and stayed skipped for the whole call.
+   *
+   * With `forceStereo: true` the browser encodes real stereo Opus, the SFU
+   * forwards it, and the subscriber plays BOTH ears natively — no WebAudio
+   * graph, no keeper element, no gesture-timing dependency. Mono-capable
+   * microphones are up-mixed by the encoder itself.
+   */
+  forceStereo: true,
 } as const;
 
 export type NoiseMode = "off" | "standard" | "enhanced" | "deep";

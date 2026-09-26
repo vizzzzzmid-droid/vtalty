@@ -93,23 +93,23 @@ Audio (Opus ~64 kbps/person) is noise next to video. A 1080p60 share with
 
 ## Voice audio quality profile (Opus)
 
-A real-usage report ("muffled/dull, crackling, occasional stutter, worse than
-Discord") traced to a **stereo-published voice track**, not to the
-noise-suppression chain. The profile is pinned in one place,
-`MIC_PUBLISH_OPTIONS` in `apps/web/src/voice/settings.ts`, and applied at both
-publish sites in `voice/room.ts` (initial join and rebuild-on-change).
+A real-usage report ("voice only in the left ear", plus "muffled/dull,
+crackling, occasional stutter, worse than Discord") traced to the **published
+channel layout**, not to the noise-suppression chain. The profile is pinned in
+one place, `MIC_PUBLISH_OPTIONS` in `apps/web/src/voice/settings.ts`, and
+applied at both publish sites in `voice/room.ts` (initial join and
+rebuild-on-change).
 
 | Setting | Value | Why |
 |---------|-------|-----|
 | `audioPreset.maxBitrate` | `64000` | LiveKit's `publishDefaults` use `AudioPresets.music` (48 kbps). Discord voice runs 64–96 kbps; 64 kbps is its floor. At 15 speakers this is ~1 Mbps aggregate, fine for a small VPS. Published as a literal object rather than `AudioPresets.music` so a future SDK default bump cannot silently change our voice quality. |
 | Capture rate | `sampleRate: 48000` | Opus encodes at 48 kHz; capturing anything else forces a resample on the way in. |
-| Capture channels | `channelCount: 1` | A voice track is mono. This is the fix for the reported symptoms — see below. |
-| `forceStereo` | `false` | Pins mono even if a device hands us 2 channels. |
+| `forceStereo` | `true` | **The fix for the one-ear symptom.** See below. |
 | `dtx` | `true` | Saves uplink during silence. Passed explicitly (see below). |
 | `red` | `true` | RFC 2198 redundant audio — the packet-loss concealment that repairs the "occasional stutter". Passed explicitly. |
 | Post-gain | `DynamicsCompressor` limiter, threshold −6 dB, ratio 12:1 | The input slider reaches 200%, so gain can exceed full scale; `MediaStreamDestination` hard-clips to 16-bit PCM, which is audible as crackling. Transparent below −6 dBFS, so normal speech is untouched. |
 
-### Why a stereo track caused all three symptoms
+### Why mono publication caused every symptom
 
 `livekit-client` 2.22.3, in `LocalParticipant.publishTrack()`:
 
@@ -123,15 +123,47 @@ if (isStereo) {
 }
 ```
 
-Our chain built a `ChannelMergerNode(2)` for **local loopback centring** and
-connected *it* to the `MediaStreamDestination`. That made the published track
-stereo, and then:
+With `forceStereo: false` the SFU negotiates **mono** Opus, and every
+subscriber therefore receives a mono track. A mono track in an `<audio>`
+element feeds channel 0 only, so the speaker's voice is audible in the **left
+ear only**. The other two reported symptoms follow from the same block:
 
-- **muffled / missing highs** — the music preset's bitrate is split across two
-  channels, so each channel got roughly half the bits;
-- **stutter** — DTX *and* RED were force-disabled, so nothing concealed lost
-  packets (RED is not Opus-internal FEC; it is the redundancy layer);
-- **crackling** — unrelated to Opus, from the 200% gain clipping (above).
+- **muffled / missing highs** — at mono the whole 64 kbps budget goes to the
+  single voice channel, but the *music* preset's encoder tuning still assumes
+  a wider band, so speech sounds dull compared to Discord's speech-tuned
+  stream;
+- **stutter** — DTX *and* RED are force-disabled whenever the track is
+  considered stereo and the flags are left undefined. We pass both explicitly,
+  so RED conceals lost packets (RED is the redundancy layer, not Opus-internal
+  FEC) — this is what repairs the occasional break-up on lossy links;
+- **crackling** — unrelated to Opus, from the 200% input gain clipping
+  (handled by the limiter above).
+
+### Why centring is done by publishing stereo, not by a receive-side graph
+
+Earlier revisions tried to fix the one-ear symptom on the **receiving** side
+(`upmix.ts`: a `ChannelMergerNode` fed from both inputs, driven by the shared
+playback `AudioContext`). That approach is inherently unreliable and was
+rolled back once after it muted the entire room:
+
+- a `MediaStreamAudioSourceNode` only works if `channelCount === 1` is actually
+  reported, and a freshly attached WebRTC track usually reports **no**
+  `channelCount` at all — so the graph was skipped and the voice stayed in one
+  ear for the whole call;
+- routing a remote track through an `AudioContext` created outside a user
+  gesture produces a **suspended** context, whose `MediaStreamDestination`
+  outputs silence while the element still reports itself as playing — the
+  "no sound at all" regression;
+- Chromium stops delivering a WebRTC stream that nothing consumes, so the
+  original stream needs a muted keeper element (same trap as the volume
+  boost in `boost.ts`).
+
+`forceStereo: true` removes the whole class of problem: the browser encodes
+real stereo Opus, the SFU forwards it, and the subscriber plays **both ears
+natively** — no WebAudio graph, no keeper element, no dependency on gesture
+timing. Mono microphones are up-mixed by the encoder itself. The publisher-side
+`ChannelMergerNode` in `chain.ts` remains for the local *loopback* ("hear
+myself") path only.
 
 `chain.ts` now publishes the **mono** gain node and uses the merger only as a
 monitoring tap for `hearMyself`. Note that this means a mono published track
@@ -156,8 +188,18 @@ degrades a sink to silence and "no sound at all" is strictly worse than one ear:
 
 - feed the mono source into **both** `ChannelMergerNode` inputs — a bare
   `connect(merger)` maps to input 0 = **LEFT only**, which is the original bug;
-- build the graph **only** for a track that reports exactly `channelCount: 1`
-  (an unknown count is left alone rather than rerouted);
+- treat a track whose `channelCount` is **not reported yet** as mono
+  (`isMonoTrack`) instead of leaving it alone. A freshly attached WebRTC track
+  usually reports no `channelCount` at all, so the stricter check silently kept
+  the voice in one ear for the whole call. Only a track that positively reports
+  2+ channels (`isStereoTrack`) is left completely alone. Folding a genuinely
+  stereo source to a centred mono stays audible, whereas never centring the
+  common mono case is the bug itself — the failure modes are not symmetric;
+- **defer, never give up**: attaching happens after the async LiveKit connect, so
+  the context is still `suspended` at that moment. The first attempt is made
+  immediately and, if it is not possible yet, retried via
+  `onPlaybackRunning` (`boost.ts`) when the context actually starts. Falling back
+  permanently on the first miss is what made the bug permanent;
 - reuse the **shared playback context from `boost.ts`**, which is already
   `running` in production and is unlocked on the first user gesture. A context
   created at join time starts `suspended`, and a suspended
@@ -165,6 +207,8 @@ degrades a sink to silence and "no sound at all" is strictly worse than one ear:
   playing — no error anywhere;
 - return `null` whenever the context is not `running`, and fall back to the
   direct attach (pre-fix behaviour: audible, maybe in one ear, never silent);
+- the element always keeps playing the **directly attached track** meanwhile, so
+  the graph is only ever swapped in on top of an already-playing element;
 - hold a muted **keeper** element on the original stream, because Chromium stops
   delivering a WebRTC stream that nothing consumes;
 - release the graph, the keeper and the up-mixed track on detach/clear.

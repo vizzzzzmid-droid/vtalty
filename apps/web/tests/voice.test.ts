@@ -260,7 +260,10 @@ describe("microphone publish quality (Opus)", () => {
   });
 
   it("never negotiates a stereo voice track", () => {
-    expect(MIC_PUBLISH_OPTIONS.forceStereo).toBe(false);
+    // Stereo publication is REQUIRED, not incidental: the SFU hands every
+    // subscriber a mono track otherwise, and a mono track in an <audio>
+    // element plays in the LEFT ear only. This single flag is the fix.
+    expect(MIC_PUBLISH_OPTIONS.forceStereo).toBe(true);
   });
 
   it("applies the publish options at every publish site", () => {

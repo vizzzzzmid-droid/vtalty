@@ -1,8 +1,12 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it } from "vitest";
 import { __resetSharedPlaybackContext } from "../src/voice/boost.js";
-import { attachRemoteAudio, clearRemoteAudio } from "../src/voice/remoteAudio.js";
-import { centerMonoTrack, isMonoTrack } from "../src/voice/upmix.js";
+import {
+  attachRemoteAudio,
+  clearRemoteAudio,
+  detachRemoteAudio,
+} from "../src/voice/remoteAudio.js";
+import { centerMonoTrack, isMonoTrack, isStereoTrack } from "../src/voice/upmix.js";
 
 /**
  * Behavioural test for the mono→stereo centring of remote audio.
@@ -26,6 +30,7 @@ class FakeAudioContext {
   state: AudioContextState;
   connections: Connection[] = [];
   destination = {};
+  private listeners: (() => void)[] = [];
 
   constructor() {
     // Chromium leaves a context created outside a gesture suspended.
@@ -81,6 +86,29 @@ class FakeAudioContext {
   close(): Promise<void> {
     return Promise.resolve();
   }
+
+  /**
+   * `onPlaybackRunning` waits on `statechange`; the fake has to honour it or the
+   * deferred centring path can never be exercised.
+   */
+  addEventListener(type: string, listener: () => void): void {
+    if (type === "statechange") {
+      this.listeners.push(listener);
+    }
+  }
+
+  removeEventListener(type: string, listener: () => void): void {
+    if (type === "statechange") {
+      this.listeners = this.listeners.filter((l) => l !== listener);
+    }
+  }
+
+  /** Flip to running and fire `statechange`, as a real context would. */
+  fireStateChange(): void {
+    for (const listener of [...this.listeners]) {
+      listener();
+    }
+  }
 }
 
 function fakeTrack(channelCount: number | undefined): MediaStreamTrack {
@@ -105,13 +133,45 @@ beforeEach(() => {
   __resetSharedPlaybackContext();
 });
 
+/** Attach a new element for `track` through the real public entry point. */
+function attachWithTrack(
+  track: MediaStreamTrack,
+  identity: string,
+): HTMLAudioElement {
+  const element = attachRemoteAudio(
+    {
+      attachedElements: [],
+      attach: () => {
+        const el = document.createElement("audio");
+        el.srcObject = new MediaStream([track]);
+        return el;
+      },
+      detach: (el?: HTMLAudioElement) => el ?? [],
+      mediaStreamTrack: track,
+    },
+    identity,
+  );
+  expect(element).not.toBeNull();
+  if (element === null) {
+    throw new Error("attachRemoteAudio returned no element");
+  }
+  return element;
+}
+
 describe("isMonoTrack", () => {
-  it("only treats an explicitly mono track as mono", () => {
+  it("treats mono and not-yet-reported tracks as mono, but leaves stereo alone", () => {
     expect(isMonoTrack(fakeTrack(1))).toBe(true);
     expect(isMonoTrack(fakeTrack(2))).toBe(false);
-    // Unknown channel count must not be rerouted.
-    expect(isMonoTrack(fakeTrack(undefined))).toBe(false);
+    // An unreported channelCount means the SFU default (mono) and is the
+    // situation that actually occurs on a freshly attached remote track:
+    // waiting for the number was what kept RNNoise voices in one ear.
+    expect(isMonoTrack(fakeTrack(undefined))).toBe(true);
     expect(isMonoTrack(null)).toBe(false);
+    expect(isMonoTrack(undefined)).toBe(false);
+    // The complementary predicate drives the "never retry" decision.
+    expect(isStereoTrack(fakeTrack(2))).toBe(true);
+    expect(isStereoTrack(fakeTrack(1))).toBe(false);
+    expect(isStereoTrack(fakeTrack(undefined))).toBe(false);
   });
 });
 
@@ -157,31 +217,6 @@ describe("centerMonoTrack", () => {
 });
 
 describe("remote audio centring wiring", () => {
-  /** Attach a new element for the track. */
-  function attachWithTrack(
-    track: MediaStreamTrack,
-    identity: string,
-  ): HTMLAudioElement {
-    const element = attachRemoteAudio(
-      {
-        attachedElements: [],
-        attach: () => {
-          const el = document.createElement("audio");
-          el.srcObject = new MediaStream([track]);
-          return el;
-        },
-        detach: (el?: HTMLAudioElement) => el ?? [],
-        mediaStreamTrack: track,
-      },
-      identity,
-    );
-    expect(element).not.toBeNull();
-    if (element === null) {
-      throw new Error("attachRemoteAudio returned no element");
-    }
-    return element;
-  }
-
   it("swaps a mono element onto the centred stream", () => {
     const original = installContext();
     try {
@@ -258,6 +293,105 @@ describe("remote audio centring wiring", () => {
       attachWithTrack(fakeTrack(1), "user-teardown");
       expect(() => clearRemoteAudio()).not.toThrow();
       expect(document.getElementById("remote-audio-container")).toBeNull();
+    } finally {
+      (globalThis as { AudioContext?: unknown }).AudioContext = original;
+    }
+  });
+});
+
+// Regression for the actual reported bug: "RNNoise on, voice in the left ear
+// only". At attach time the LiveKit track is brand new (its channelCount is
+// usually not reported yet) AND the shared playback context is still suspended
+// (attaching happens after the async connect, outside the join click). The old
+// code treated "cannot centre right now" as "never" and silently kept the
+// one-ear audio for the whole call.
+describe("deferred centring (left-ear regression)", () => {
+  it("centres later, once the shared context is actually running", () => {
+    const original = installContext();
+    FakeAudioContext.suspended = true;
+    try {
+      // A track whose channelCount is not reported yet — the live situation.
+      const track = fakeTrack(undefined);
+      const direct = new MediaStream([track]);
+      const element = attachRemoteAudio(
+        {
+          attachedElements: [],
+          attach: () => {
+            const el = document.createElement("audio");
+            el.srcObject = direct;
+            return el;
+          },
+          detach: (el?: HTMLAudioElement) => el ?? [],
+          mediaStreamTrack: track,
+        },
+        "user-deferred",
+      );
+      expect(element).not.toBeNull();
+      // Audible immediately, even though centring is not possible yet.
+      expect(element?.srcObject).toBe(direct);
+      expect(FakeAudioContext.last?.connections ?? []).toHaveLength(0);
+
+      // The gesture unlocks the shared context...
+      const ctx = FakeAudioContext.last;
+      expect(ctx?.state).toBe("suspended");
+      if (ctx === undefined) {
+        throw new Error("no context was created");
+      }
+      ctx.unlock();
+      ctx.fireStateChange();
+
+      // ...and the element is upgraded to the centred stream, not left as-is.
+      expect(FakeAudioContext.last?.connections).toEqual([
+        { output: 0, input: 0 },
+        { output: 0, input: 1 },
+      ]);
+      expect(element?.srcObject).not.toBe(direct);
+    } finally {
+      (globalThis as { AudioContext?: unknown }).AudioContext = original;
+    }
+  });
+
+  it("never retries a track that is known to be stereo", () => {
+    const original = installContext();
+    FakeAudioContext.suspended = true;
+    try {
+      const element = attachWithTrack(fakeTrack(2), "user-stereo");
+      // Stereo needs no centring, so no context is built and no retry armed:
+      // re-checking a settled channelCount on every statechange is pointless.
+      expect(FakeAudioContext.instances).toHaveLength(0);
+      expect(element.srcObject).toBeInstanceOf(MediaStream);
+      FakeAudioContext.instances.forEach((ctx) => ctx.fireStateChange());
+      expect(FakeAudioContext.instances).toHaveLength(0);
+    } finally {
+      (globalThis as { AudioContext?: unknown }).AudioContext = original;
+    }
+  });
+
+  it("cancels a pending retry when the element is detached", () => {
+    const original = installContext();
+    FakeAudioContext.suspended = true;
+    try {
+      const track = fakeTrack(undefined);
+      const element = attachWithTrack(track, "user-leaves");
+      // Centring is pending: the context exists but is suspended.
+      const ctx = FakeAudioContext.last;
+      expect(ctx?.state).toBe("suspended");
+
+      detachRemoteAudio(
+        {
+          attachedElements: [element],
+          attach: () => element,
+          detach: (el?: HTMLAudioElement) => el ?? [],
+          mediaStreamTrack: track,
+        },
+      );
+      expect(element.isConnected).toBe(false);
+
+      // A later unlock must not resurrect the graph on a removed element,
+      // and must not leave the waiter registered for the session.
+      ctx?.unlock();
+      ctx?.fireStateChange();
+      expect(FakeAudioContext.last?.connections ?? []).toHaveLength(0);
     } finally {
       (globalThis as { AudioContext?: unknown }).AudioContext = original;
     }

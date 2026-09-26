@@ -96,9 +96,60 @@ function installUnlockListeners(): void {
     if (sharedContext !== null && sharedContext.state === "suspended") {
       void sharedContext.resume();
     }
+    // A gesture can also flip the context to "running" without a
+    // statechange event we would otherwise miss, so notify waiters here too.
+    notifyPlaybackRunning();
   };
   document.addEventListener("pointerdown", unlock);
   document.addEventListener("keydown", unlock);
+}
+
+/** Callbacks waiting for the shared context to become usable. */
+const runningWaiters = new Set<() => void>();
+const stateWaiters = new WeakSet<AudioContext>();
+
+function notifyPlaybackRunning(): void {
+  for (const waiter of [...runningWaiters]) {
+    try {
+      waiter();
+    } catch {
+      // A waiter must never break the unlock path.
+    }
+  }
+}
+
+/**
+ * Run `callback` as soon as the shared playback context is `running` — now if
+ * it already is, otherwise on the next unlock gesture / statechange.
+ *
+ * Remote mic tracks are attached after the async LiveKit connect, i.e. outside
+ * the join click, so the context is still `suspended` at that moment and a
+ * Mono→stereo graph built then would output silence. The centring path uses
+ * this to defer instead of falling back permanently (see upmix.ts).
+ */
+export function onPlaybackRunning(callback: () => void): () => void {
+  const ctx = playbackContext();
+  if (ctx === null) {
+    // No WebAudio at all: the caller must keep its direct-attach fallback.
+    return () => undefined;
+  }
+  if (ctx.state === "running") {
+    callback();
+    return () => undefined;
+  }
+  runningWaiters.add(callback);
+  if (!stateWaiters.has(ctx)) {
+    stateWaiters.add(ctx);
+    ctx.addEventListener("statechange", () => {
+      if (ctx.state === "running") {
+        notifyPlaybackRunning();
+      }
+    });
+  }
+  void ctx.resume().then(notifyPlaybackRunning, () => undefined);
+  return () => {
+    runningWaiters.delete(callback);
+  };
 }
 
 interface BoostNode {

@@ -1,6 +1,14 @@
 import type { Track } from "livekit-client";
-import { applyElementVolume, releaseElementVolume } from "./boost.js";
-import { centerMonoTrack, type CenteredStream } from "./upmix.js";
+import {
+  applyElementVolume,
+  onPlaybackRunning,
+  releaseElementVolume,
+} from "./boost.js";
+import {
+  centerMonoTrack,
+  isStereoTrack,
+  type CenteredStream,
+} from "./upmix.js";
 
 /**
  * Hidden playback sink for remote microphone audio.
@@ -32,22 +40,60 @@ export interface AttachableAudioTrack {
  * never keep a graph (or its keeper element) alive.
  */
 const centered = new WeakMap<HTMLAudioElement, CenteredStream>();
+/** Unsubscribers for centring that is still waiting for a running context. */
+const centeringRetries = new WeakMap<HTMLAudioElement, () => void>();
 
 /**
  * Route a mono track through the shared playback context so the voice is
- * centred in BOTH ears. Any failure falls back to a direct attach, which is
- * the pre-fix behaviour: audible in one ear rather than silent.
+ * centred in BOTH ears.
+ *
+ * At attach time the track is brand new: its `channelCount` is usually not
+ * reported yet, and the shared context is still `suspended` because attaching
+ * happens after the async LiveKit connect, outside the join click. Both make
+ * centring impossible *yet* — so instead of falling back for good (which left
+ * the voice in one ear for the whole call, the bug this fixes) the attempt is
+ * deferred and re-evaluated once the context actually runs.
+ *
+ * The element always keeps playing the directly attached track meanwhile, so
+ * every failure or wait keeps it audible; the graph is only ever swapped in on
+ * top of an already-playing element.
  */
 function centerElement(element: HTMLAudioElement, mediaTrack: MediaStreamTrack | undefined): void {
   if (mediaTrack === undefined || centered.has(element)) {
     return;
   }
-  const graph = centerMonoTrack(mediaTrack);
-  if (graph === null) {
+  // True when the element now plays the centred graph.
+  const apply = (): boolean => {
+    if (centered.has(element) || !element.isConnected) {
+      return centered.has(element);
+    }
+    const graph = centerMonoTrack(mediaTrack);
+    if (graph === null) {
+      return false;
+    }
+    centered.set(element, graph);
+    const previous = element.srcObject;
+    element.srcObject = graph.stream;
+    if (previous !== null) {
+      try {
+        void element.play().catch(() => undefined);
+      } catch {
+        // Autoplay blocked; the existing playback banner covers it.
+      }
+    }
+    return true;
+  };
+  if (apply()) {
     return;
   }
-  centered.set(element, graph);
-  element.srcObject = graph.stream;
+  // Unavailable now (not mono yet, or no WebAudio at all) — try again when the
+  // shared context is running, and give up silently if it is still impossible.
+  // A stereo track is never retried: only mono needs centring, and re-checking
+  // a settled channelCount on every state change is pure overhead.
+  if (isStereoTrack(mediaTrack)) {
+    return;
+  }
+  centeringRetries.set(element, onPlaybackRunning(apply));
 }
 
 export function remoteAudioContainer(owner: Document = document): HTMLDivElement {
@@ -117,6 +163,10 @@ export function setRemoteAudioVolume(
 
 /** Drop a centring graph and hand the element back to its original stream. */
 function releaseCentering(element: HTMLAudioElement): void {
+  // Always cancel a pending retry first: it would otherwise re-attach a graph
+  // to a removed element and stay in runningWaiters for the session.
+  centeringRetries.get(element)?.();
+  centeringRetries.delete(element);
   const graph = centered.get(element);
   if (graph === undefined) {
     return;
