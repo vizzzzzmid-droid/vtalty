@@ -1,5 +1,6 @@
 import type { Track } from "livekit-client";
 import { applyElementVolume, releaseElementVolume } from "./boost.js";
+import { disposeUpmixedStream, upmixToStereo } from "./upmix.js";
 
 /**
  * Hidden playback sink for remote microphone audio.
@@ -22,6 +23,8 @@ export interface AttachableAudioTrack {
   attachedElements: HTMLMediaElement[];
   attach: () => HTMLMediaElement;
   detach: (element?: HTMLMediaElement) => HTMLMediaElement[] | HTMLMediaElement;
+  /** Present on real LiveKit tracks; absent on test doubles. */
+  mediaStreamTrack?: MediaStreamTrack | null;
 }
 
 export function remoteAudioContainer(owner: Document = document): HTMLDivElement {
@@ -62,6 +65,18 @@ export function attachRemoteAudio(
   }
   if (!(element instanceof HTMLAudioElement)) {
     return null;
+  }
+  // LiveKit hands subscribers a MONO opus stream (the SFU down-mixes for the
+  // wire), and a mono track played directly into an <audio> element comes out
+  // in one ear only on Chromium/Electron. Re-point the element at a stereo
+  // up-mix of the same track; fall back to the direct attach when WebAudio is
+  // unavailable (one ear, but audible) rather than dropping the participant.
+  const mediaStreamTrack = track.mediaStreamTrack;
+  if (mediaStreamTrack !== undefined && mediaStreamTrack !== null) {
+    const upmixed = upmixToStereo(mediaStreamTrack);
+    if (upmixed !== null) {
+      element.srcObject = upmixed;
+    }
   }
   element.dataset["identity"] = identity;
   container.appendChild(element);
@@ -106,6 +121,12 @@ export function detachRemoteAudio(
     } catch {
       // Already detached elsewhere.
     }
+    // An up-mixed stream is ours, not LiveKit's: stop it so the graph is
+    // released (a bare detach would leave a live destination track behind).
+    disposeUpmixedStream(
+      element.srcObject instanceof MediaStream ? element.srcObject : null,
+    );
+    element.srcObject = null;
     releaseElementVolume(element);
     element.remove();
   }
@@ -120,6 +141,9 @@ export function detachRemoteAudioFor(identity: string, owner: Document = documen
   for (const element of container.querySelectorAll<HTMLAudioElement>("audio")) {
     if (element.dataset["identity"] === identity) {
       element.removeAttribute("src");
+      disposeUpmixedStream(
+        element.srcObject instanceof MediaStream ? element.srcObject : null,
+      );
       element.srcObject = null;
       releaseElementVolume(element);
       element.remove();

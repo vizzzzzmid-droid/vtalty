@@ -5,6 +5,11 @@ import { getRoom, setSuppressShareNotice } from "./room.js";
 import { useVoiceConnection } from "./store.js";
 import { useVoiceSettings } from "./settings.js";
 import { applyElementVolume, releaseElementVolume } from "./boost.js";
+import {
+  disposeUpmixedStream,
+  resumeUpmixContext,
+  upmixToStereo,
+} from "./upmix.js";
 
 type LiveKitModule = typeof import("livekit-client");
 
@@ -322,70 +327,24 @@ export function attachStreamAudio(
   return () => {
     untrackStreamAudioElement(identity, element);
     try {
-      // For upmixed tracks, we have a MediaStream that we need to clean up.
-      const currentSrc = element.srcObject;
-      if (currentSrc instanceof MediaStream) {
-        // The up-mixed stereo track we created: stop the audio tracks and clear.
-        for (const upmixed of currentSrc.getAudioTracks()) {
-          upmixed.stop();
-        }
-        element.srcObject = null;
-      } else if (currentSrc === null) {
-        // Already cleared.
-      } else {
-        // Direct attach case: use the track's detach method.
-        // We can't compare directly with track due to type differences,
-        // so we check if the element still has a srcObject that isn't a MediaStream.
-        track.detach(element);
-      }
+      // Always hand the element back to LiveKit first: a direct attach also
+      // carries a MediaStream srcObject, so branching on `instanceof
+      // MediaStream` cannot tell an up-mix apart from a plain attach and
+      // leaked the LiveKit-side attachment on the up-mixed path.
+      track.detach(element);
+      // The up-mixed stereo track is ours, not LiveKit's: stop it so the
+      // WebAudio graph is released.
+      disposeUpmixedStream(
+        element.srcObject instanceof MediaStream ? element.srcObject : null,
+      );
+      element.srcObject = null;
     } catch {
       // Element/audio context already gone.
     }
   };
 }
 
-/** Up-mix a MediaStreamTrack to stereo via AudioContext.
- *
- * If the track is already stereo, the merger passes it through unchanged.
- * If mono, both output channels receive the same signal (centered playback).
- */
-function upmixToStereo(track: MediaStreamTrack): MediaStream | null {
-  try {
-    // Use a shared AudioContext for the upmix operation.
-    let ctx = sharedContext;
-    if (ctx === null) {
-      ctx = new AudioContext({ sampleRate: 48000 });
-      sharedContext = ctx;
-    }
-    resumeStreamAudioContext();
-    // Wrap the track in a MediaStream for createMediaStreamSource.
-    const stream = new MediaStream([track]);
-    const source = ctx.createMediaStreamSource(stream);
-    const merger = ctx.createChannelMerger(2);
-    // ChannelMergerNode maps input N to output channel N: a bare
-    // `source.connect(merger)` feeds input 0 (LEFT) only, so the audio plays
-    // in one ear. Mono sources must be fed into BOTH inputs to be centred.
-    if (track.getSettings().channelCount === 2) {
-      // Genuine stereo source: keep L/R separation via a splitter (connecting
-      // stereo straight into a merger input would down-mix it to mono).
-      const splitter = ctx.createChannelSplitter(2);
-      source.connect(splitter);
-      splitter.connect(merger, 0, 0);
-      splitter.connect(merger, 1, 1);
-    } else {
-      source.connect(merger, 0, 0);
-      source.connect(merger, 0, 1);
-    }
-    const dest = ctx.createMediaStreamDestination();
-    merger.connect(dest);
-    return dest.stream;
-  } catch {
-    return null;
-  }
-}
-
-let sharedContext: AudioContext | null = null;
-
+/** Test hook: the shared context now lives in upmix.ts. */
 /**
  * Chromium/Electron start an AudioContext created outside a user gesture in
  * the "suspended" state — its MediaStreamDestination then carries silence
@@ -422,9 +381,7 @@ function untrackStreamAudioElement(identity: string, element: HTMLAudioElement):
 let unlockListenersInstalled = false;
 
 function resumeStreamAudioContext(): void {
-  if (sharedContext !== null && sharedContext.state === "suspended") {
-    void sharedContext.resume();
-  }
+  resumeUpmixContext();
 }
 
 function tryPlay(element: HTMLAudioElement): void {

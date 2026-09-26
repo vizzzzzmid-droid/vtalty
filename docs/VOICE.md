@@ -137,6 +137,32 @@ stereo, and then:
 monitoring tap for `hearMyself`. Receivers already centre mono playback
 (`remoteAudio.ts` merges mono into both channels), so nothing is lost.
 
+### Receiver-side centring (`upmix.ts`) — the real "left ear only" cause
+
+RNNoise/DeepFilterNet make the published track **mono**, and LiveKit delivers
+mono to subscribers. A mono track played straight into an `<audio>` element is
+rendered in **one ear only** on the Chromium/Electron renderers we ship, which
+is why the symptom appeared *only* when a noise suppressor was enabled.
+
+The publisher-side merger in `chain.ts` cannot fix this: the SFU down-mixes to
+mono for the wire, so **every subscriber receives mono regardless**. The fix has
+to be on the receiving side, so all playback sinks route through one helper,
+`upmixToStereo()` in `apps/web/src/voice/upmix.ts`:
+
+- a mono track is fed into **both** `ChannelMergerNode` inputs — a bare
+  `connect(merger)` maps to input 0 = **LEFT only**, which was the original bug;
+- a genuine stereo track goes through a `ChannelSplitter` so L and R stay
+  separated (wiring stereo straight into a merger input would down-mix it);
+- both remote mic elements (`remoteAudio.ts`) **and** stream-tile elements
+  (`screen.ts`) use the same helper, so the two sinks cannot drift apart;
+- one shared 48 kHz `AudioContext`, resumed explicitly — Chromium starts a
+  context created outside a user gesture *suspended*, and a suspended
+  `MediaStreamDestination` carries **silence** even though the element reports as
+  playing;
+- if WebAudio is unavailable the helper returns `null` and callers fall back to a
+  direct attach (one ear, but audible) rather than dropping the participant;
+- on detach the up-mixed track is stopped, otherwise the graph leaks.
+
 `dtx`/`red` are still passed explicitly: it documents intent, and it survives
 the `??= false` branch above if a stereo track ever slips through.
 
