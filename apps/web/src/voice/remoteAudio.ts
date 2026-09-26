@@ -1,5 +1,6 @@
 import type { Track } from "livekit-client";
 import { applyElementVolume, releaseElementVolume } from "./boost.js";
+import { centerMonoTrack, type CenteredStream } from "./upmix.js";
 
 /**
  * Hidden playback sink for remote microphone audio.
@@ -22,6 +23,31 @@ export interface AttachableAudioTrack {
   attachedElements: HTMLMediaElement[];
   attach: () => HTMLMediaElement;
   detach: (element?: HTMLMediaElement) => HTMLMediaElement[] | HTMLMediaElement;
+  /** Underlying track, used to decide whether centring is needed. */
+  mediaStreamTrack?: MediaStreamTrack;
+}
+
+/**
+ * Centring graphs attached per element. WeakMap so a forgotten teardown can
+ * never keep a graph (or its keeper element) alive.
+ */
+const centered = new WeakMap<HTMLAudioElement, CenteredStream>();
+
+/**
+ * Route a mono track through the shared playback context so the voice is
+ * centred in BOTH ears. Any failure falls back to a direct attach, which is
+ * the pre-fix behaviour: audible in one ear rather than silent.
+ */
+function centerElement(element: HTMLAudioElement, mediaTrack: MediaStreamTrack | undefined): void {
+  if (mediaTrack === undefined || centered.has(element)) {
+    return;
+  }
+  const graph = centerMonoTrack(mediaTrack);
+  if (graph === null) {
+    return;
+  }
+  centered.set(element, graph);
+  element.srcObject = graph.stream;
 }
 
 export function remoteAudioContainer(owner: Document = document): HTMLDivElement {
@@ -65,6 +91,7 @@ export function attachRemoteAudio(
   }
   element.dataset["identity"] = identity;
   container.appendChild(element);
+  centerElement(element, track.mediaStreamTrack);
   return element;
 }
 
@@ -88,6 +115,17 @@ export function setRemoteAudioVolume(
   }
 }
 
+/** Drop a centring graph and hand the element back to its original stream. */
+function releaseCentering(element: HTMLAudioElement): void {
+  const graph = centered.get(element);
+  if (graph === undefined) {
+    return;
+  }
+  centered.delete(element);
+  element.srcObject = graph.input;
+  graph.release();
+}
+
 /** Detach a track's hidden elements (unsubscribe path). */
 export function detachRemoteAudio(
   track: Track | AttachableAudioTrack,
@@ -101,6 +139,9 @@ export function detachRemoteAudio(
     (candidate): candidate is HTMLAudioElement =>
       candidate instanceof HTMLAudioElement && candidate.parentElement === container,
   )) {
+    // Restore the original stream BEFORE detaching, so the element is never
+    // left pointing at a torn-down graph output.
+    releaseCentering(element);
     try {
       track.detach(element);
     } catch {
@@ -119,6 +160,7 @@ export function detachRemoteAudioFor(identity: string, owner: Document = documen
   }
   for (const element of container.querySelectorAll<HTMLAudioElement>("audio")) {
     if (element.dataset["identity"] === identity) {
+      releaseCentering(element);
       element.removeAttribute("src");
       element.srcObject = null;
       releaseElementVolume(element);
@@ -132,6 +174,7 @@ export function clearRemoteAudio(owner: Document = document): void {
   const container = owner.getElementById(REMOTE_AUDIO_CONTAINER_ID);
   if (container instanceof HTMLDivElement) {
     for (const element of container.querySelectorAll<HTMLAudioElement>("audio")) {
+      releaseCentering(element);
       releaseElementVolume(element);
     }
     container.remove();

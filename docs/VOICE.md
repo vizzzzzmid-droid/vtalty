@@ -141,7 +141,7 @@ reaches the receiver, and Chromium/Electron render a mono `<audio>` source in
 `dtx`/`red` are still passed explicitly: it documents intent, and it survives
 the `??= false` branch above if a stereo track ever slips through.
 
-### Open issue: mono playback lands in one ear
+### Mono playback centring (fixed)
 
 RNNoise/DeepFilterNet (and the mono publish above) produce a **mono** track.
 LiveKit delivers mono to subscribers, and a mono `MediaStream` attached straight
@@ -150,27 +150,30 @@ renderers we ship, so the symptom appears *only* with a suppressor enabled.
 
 The publisher-side `ChannelMergerNode` in `chain.ts` cannot fix it: the SFU
 down-mixes to mono for the wire, so **every subscriber receives mono
-regardless**. A receiver-side up-mix is the only correct place, and it MUST be
-built so that a suspended `AudioContext` degrades to a direct (mono but audible)
-attach instead of silence:
+regardless**. A receiver-side up-mix (`src/voice/upmix.ts`) is therefore the only
+correct place. It is built defensively, because a suspended `AudioContext`
+degrades a sink to silence and "no sound at all" is strictly worse than one ear:
 
 - feed the mono source into **both** `ChannelMergerNode` inputs — a bare
   `connect(merger)` maps to input 0 = **LEFT only**, which is the original bug;
-- route genuine stereo through a `ChannelSplitter` so L/R stay separated;
-- create the context inside (or resumed by) a **user gesture**: a context created
-  during the join starts `suspended`, and a suspended `MediaStreamDestination`
-  delivers **silence** while the element still reports as playing — i.e. "no
-  sound at all", with no error anywhere;
+- build the graph **only** for a track that reports exactly `channelCount: 1`
+  (an unknown count is left alone rather than rerouted);
+- reuse the **shared playback context from `boost.ts`**, which is already
+  `running` in production and is unlocked on the first user gesture. A context
+  created at join time starts `suspended`, and a suspended
+  `MediaStreamDestination` delivers silence while the element still reports as
+  playing — no error anywhere;
 - return `null` whenever the context is not `running`, and fall back to the
-  direct attach;
-- stop the up-mixed track on detach, otherwise the graph leaks.
+  direct attach (pre-fix behaviour: audible, maybe in one ear, never silent);
+- hold a muted **keeper** element on the original stream, because Chromium stops
+  delivering a WebRTC stream that nothing consumes;
+- release the graph, the keeper and the up-mixed track on detach/clear.
 
 A previous attempt (commits `9bc781c`/`d11bd1e`) routed every sink through one
-shared up-mix helper. It muted the whole room: the shared context was created
-outside a gesture, and the gesture-resume path was not reliable enough for a
-failure mode this severe. It was reverted. Any reintroduction must keep the
-`null`/fallback contract above AND be verified by listening in a real call with
-Enhanced/Deep enabled, not only by unit tests.
+shared up-mix helper built on a context created outside a gesture, and muted the
+whole room; it was reverted in `6274538`. The rules above exist because of that
+regression — do not relax them without listening in a real call with Enhanced/Deep
+enabled, not only running the unit tests.
 
 ### Not changed, and why
 

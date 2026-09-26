@@ -13,8 +13,16 @@ const screenSource = readFileSync(
   resolve(process.cwd(), "src/voice/screen.ts"),
   "utf8",
 );
+const upmixSource = readFileSync(
+  resolve(process.cwd(), "src/voice/upmix.ts"),
+  "utf8",
+);
 const chainSource = readFileSync(
   resolve(process.cwd(), "src/voice/chain.ts"),
+  "utf8",
+);
+const remoteAudioSource = readFileSync(
+  resolve(process.cwd(), "src/voice/remoteAudio.ts"),
   "utf8",
 );
 
@@ -121,18 +129,33 @@ describe("stream audio element", () => {
 // channel silent. The same source must be fed into BOTH inputs (0 and 1).
 describe("mono→stereo centering (left-ear regression)", () => {
   it("screen-share upmix feeds the source into BOTH merger inputs", () => {
-    expect(screenSource).toContain("source.connect(merger, 0, 0)");
-    expect(screenSource).toContain("source.connect(merger, 0, 1)");
+    expect(upmixSource).toContain("source.connect(merger, 0, 0)");
+    expect(upmixSource).toContain("source.connect(merger, 0, 1)");
     // No bare connect(merger); STATEMENT (line-start, immediate close paren).
-    expect(screenSource).not.toMatch(/^\s*\w+\.connect\(merger\);/m);
+    expect(upmixSource).not.toMatch(/^\s*\w+\.connect\(merger\);/m);
   });
 
-  it("screen-share upmix keeps genuine stereo sources separated", () => {
-    // A merger input down-mixes stereo to mono; stereo sources must go
-    // through a ChannelSplitter so L and R land on inputs 0 and 1.
-    expect(screenSource).toContain("createChannelSplitter(2)");
-    expect(screenSource).toContain("splitter.connect(merger, 0, 0)");
-    expect(screenSource).toContain("splitter.connect(merger, 1, 1)");
+  // Regression: the first up-mix attempt silenced ALL voice audio, because it
+  // built its own AudioContext outside a user gesture (suspended context =>
+  // silent MediaStreamDestination). Centring must reuse the shared playback
+  // context, refuse to build while it is not running, and always fall back to
+  // a direct attach.
+  it("centring refuses to build on a suspended context and falls back", () => {
+    expect(upmixSource).toContain("sharedPlaybackContext");
+    expect(upmixSource).toMatch(/ctx\.state !== "running"/);
+    // Every failure path returns null so the caller can attach directly.
+    expect(upmixSource).toContain("return null;");
+    // The original WebRTC stream must stay consumed (Chromium drops streams
+    // nothing consumes, which is what muted the room).
+    expect(upmixSource).toContain("keepStreamAlive");
+  });
+
+  it("centring is wired into both remote-mic and screen-share playback", () => {
+    expect(remoteAudioSource).toContain("centerMonoTrack");
+    expect(screenSource).toContain("centerMonoTrack");
+    // screen.ts must no longer keep its own private context/merger.
+    expect(screenSource).not.toContain("upmixToStereo");
+    expect(screenSource).not.toContain("new AudioContext(");
   });
 
   it("noise-suppression chain upmix feeds the source into BOTH merger inputs", () => {

@@ -81,6 +81,12 @@ function playbackContext(): AudioContext | null {
   return sharedContext;
 }
 
+/** Test hook: forget the cached context so a fresh one is built next time. */
+export function __resetSharedPlaybackContext(): void {
+  sharedContext = null;
+  unlockListenersInstalled = false;
+}
+
 function installUnlockListeners(): void {
   if (unlockListenersInstalled || typeof document === "undefined") {
     return;
@@ -120,6 +126,57 @@ function tryPlay(element: HTMLMediaElement): void {
   } catch {
     // Autoplay blocked; the unlock listeners retry on the next gesture.
   }
+}
+
+/**
+ * The shared playback AudioContext, or null when WebAudio is unavailable.
+ *
+ * Exported for the mono→stereo centring in upmix.ts: a second AudioContext
+ * created outside a user gesture is a KNOWN dead end — Chromium leaves it
+ * "suspended", and a suspended MediaStreamDestination outputs silence, so the
+ * element reports as playing while nothing is audible (this killed all voice
+ * audio once already, see §7 of docs/VOICE.md). The voice path must therefore
+ * reuse THIS context, which is already proven to run in production because the
+ * volume boost drives it, and its unlock listeners resume it on the first
+ * pointer/key gesture.
+ */
+export function sharedPlaybackContext(): AudioContext | null {
+  return playbackContext();
+}
+
+/**
+ * A muted <audio> that keeps `stream` alive, returned together with its
+ * release function.
+ *
+ * Chromium stops delivering a WebRTC remote stream once nothing consumes it
+ * (header failure mode 2): once an element is rerouted onto a WebAudio graph
+ * output, the original stream has no media element left, and both the element
+ * and the graph go silent. A muted keeper keeps the original stream consumed
+ * for the lifetime of the reroute.
+ */
+export function keepStreamAlive(
+  stream: MediaStream,
+  owner: Document = document,
+): (() => void) {
+  const keeper = owner.createElement("audio");
+  keeper.muted = true;
+  keeper.autoplay = true;
+  keeper.srcObject = stream;
+  keeper.setAttribute("aria-hidden", "true");
+  // Visually hidden but NOT display:none (some browsers suspend media there).
+  keeper.style.cssText =
+    "position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;";
+  owner.body.appendChild(keeper);
+  tryPlay(keeper);
+  return () => {
+    keeper.srcObject = null;
+    try {
+      keeper.pause();
+    } catch {
+      // Already detached.
+    }
+    keeper.remove();
+  };
 }
 
 /** Muted consumer for the original stream; header failure mode 2. */

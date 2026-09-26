@@ -4,7 +4,8 @@ import type { ContentHintMode, ScreenPresetId } from "./store.js";
 import { getRoom, setSuppressShareNotice } from "./room.js";
 import { useVoiceConnection } from "./store.js";
 import { useVoiceSettings } from "./settings.js";
-import { applyElementVolume, releaseElementVolume } from "./boost.js";
+import { applyElementVolume, releaseElementVolume, sharedPlaybackContext } from "./boost.js";
+import { centerMonoTrack, type CenteredStream } from "./upmix.js";
 
 type LiveKitModule = typeof import("livekit-client");
 
@@ -292,20 +293,19 @@ export function attachStreamAudio(
     };
   }
   if (element.srcObject === null) {
-    // Always upmix to stereo to ensure centered audio playback.
-    // This handles both mono tracks (duplicated into L+R) and stereo tracks
-    // (L/R kept separated via a ChannelSplitter).
+    // Centre mono through the SHARED playback context (upmix.ts). It returns
+    // null on any failure — including a suspended context, which is what
+    // silenced the whole room in an earlier attempt — and we then fall back
+    // to a direct attach, which is never silent.
     const mediaStreamTrack = track.mediaStreamTrack;
-    if (mediaStreamTrack !== null && mediaStreamTrack !== undefined) {
-      const upmixed = upmixToStereo(mediaStreamTrack);
-      if (upmixed !== null) {
-        element.srcObject = upmixed;
-      } else {
-        track.attach(element);
-      }
+    const graph =
+      mediaStreamTrack === null || mediaStreamTrack === undefined
+        ? null
+        : centerMonoTrack(mediaStreamTrack);
+    if (graph !== null) {
+      streamGraphs.set(element, graph);
+      element.srcObject = graph.stream;
     } else {
-      // Fallback: attach directly if we can't access the underlying track.
-      // In this case, we use the track's attach method which handles cleanup.
       track.attach(element);
     }
     tryPlay(element);
@@ -322,69 +322,26 @@ export function attachStreamAudio(
   return () => {
     untrackStreamAudioElement(identity, element);
     try {
-      // For upmixed tracks, we have a MediaStream that we need to clean up.
-      const currentSrc = element.srcObject;
-      if (currentSrc instanceof MediaStream) {
-        // The up-mixed stereo track we created: stop the audio tracks and clear.
-        for (const upmixed of currentSrc.getAudioTracks()) {
-          upmixed.stop();
-        }
-        element.srcObject = null;
-      } else if (currentSrc === null) {
-        // Already cleared.
+      const graph = streamGraphs.get(element);
+      if (graph !== undefined) {
+        // Restore the original stream BEFORE tearing the graph down, so the
+        // element is never left pointing at a stopped graph output.
+        streamGraphs.delete(element);
+        element.srcObject = graph.input;
+        graph.release();
+        track.detach(element);
       } else {
-        // Direct attach case: use the track's detach method.
-        // We can't compare directly with track due to type differences,
-        // so we check if the element still has a srcObject that isn't a MediaStream.
         track.detach(element);
       }
+      element.srcObject = null;
     } catch {
       // Element/audio context already gone.
     }
   };
 }
 
-/** Up-mix a MediaStreamTrack to stereo via AudioContext.
- *
- * If the track is already stereo, the merger passes it through unchanged.
- * If mono, both output channels receive the same signal (centered playback).
- */
-function upmixToStereo(track: MediaStreamTrack): MediaStream | null {
-  try {
-    // Use a shared AudioContext for the upmix operation.
-    let ctx = sharedContext;
-    if (ctx === null) {
-      ctx = new AudioContext({ sampleRate: 48000 });
-      sharedContext = ctx;
-    }
-    resumeStreamAudioContext();
-    // Wrap the track in a MediaStream for createMediaStreamSource.
-    const stream = new MediaStream([track]);
-    const source = ctx.createMediaStreamSource(stream);
-    const merger = ctx.createChannelMerger(2);
-    // ChannelMergerNode maps input N to output channel N: a bare
-    // `source.connect(merger)` feeds input 0 (LEFT) only, so the audio plays
-    // in one ear. Mono sources must be fed into BOTH inputs to be centred.
-    if (track.getSettings().channelCount === 2) {
-      // Genuine stereo source: keep L/R separation via a splitter (connecting
-      // stereo straight into a merger input would down-mix it to mono).
-      const splitter = ctx.createChannelSplitter(2);
-      source.connect(splitter);
-      splitter.connect(merger, 0, 0);
-      splitter.connect(merger, 1, 1);
-    } else {
-      source.connect(merger, 0, 0);
-      source.connect(merger, 0, 1);
-    }
-    const dest = ctx.createMediaStreamDestination();
-    merger.connect(dest);
-    return dest.stream;
-  } catch {
-    return null;
-  }
-}
-
-let sharedContext: AudioContext | null = null;
+/** Centring graphs owned by stream-tile elements (for teardown). */
+const streamGraphs = new WeakMap<HTMLAudioElement, CenteredStream>();
 
 /**
  * Chromium/Electron start an AudioContext created outside a user gesture in
@@ -422,8 +379,11 @@ function untrackStreamAudioElement(identity: string, element: HTMLAudioElement):
 let unlockListenersInstalled = false;
 
 function resumeStreamAudioContext(): void {
-  if (sharedContext !== null && sharedContext.state === "suspended") {
-    void sharedContext.resume();
+  // The centring graph lives in the shared playback context (boost.ts), which
+  // owns its own resume-on-gesture handling. Nudge it on every attach too.
+  const ctx = sharedPlaybackContext();
+  if (ctx !== null && ctx.state === "suspended") {
+    void ctx.resume();
   }
 }
 
