@@ -20,6 +20,15 @@ let sharedContext: AudioContext | null = null;
 export function upmixContext(): AudioContext {
   if (sharedContext === null) {
     sharedContext = new AudioContext({ sampleRate: 48000 });
+    // A context born outside a user gesture is "suspended", and so are contexts
+    // Chrome re-suspends on some state changes. Self-heal on every transition:
+    // a suspended context still reports the element as playing but delivers
+    // silence, which is indistinguishable from "muted" for the user.
+    sharedContext.addEventListener("statechange", () => {
+      if (sharedContext !== null && sharedContext.state === "suspended") {
+        void sharedContext.resume().catch(() => undefined);
+      }
+    });
   }
   return sharedContext;
 }
@@ -57,6 +66,13 @@ export function upmixToStereo(track: MediaStreamTrack): MediaStream | null {
   try {
     const ctx = upmixContext();
     resumeUpmixContext();
+    // If the context is still suspended (no user gesture yet), routing through
+    // it would mute the participant entirely. Fall back to the direct attach:
+    // one ear, but audible. The statechange listener resumes the context, and
+    // the element is re-pointed on the next attach/gesture.
+    if (ctx.state !== "running") {
+      return null;
+    }
     const stream = new MediaStream([track]);
     const source = ctx.createMediaStreamSource(stream);
     const merger = ctx.createChannelMerger(2);

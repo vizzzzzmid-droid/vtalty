@@ -163,6 +163,23 @@ to be on the receiving side, so all playback sinks route through one helper,
   direct attach (one ear, but audible) rather than dropping the participant;
 - on detach the up-mixed track is stopped, otherwise the graph leaks.
 
+**Suspended context = total silence.** The shared context is created outside a
+user gesture (the first remote track attaches during the join), so Chromium
+leaves it `suspended`, and a suspended `MediaStreamDestination` delivers
+silence while the element still reports as *playing* — i.e. "no sound at all"
+with no error anywhere. Three guards:
+
+- `upmixToStereo()` refuses to build a graph on a non-`running` context and
+  returns `null`, so the sink degrades to the direct attach instead of muting
+  the participant;
+- the context self-heals on every `statechange` (Chrome also re-suspends
+  spontaneously);
+- `startAudioPlayback()` (the "click to enable audio" gesture) resumes our
+  context as well — `room.startAudio()` only resumes LiveKit's own.
+
+This is why routing *everything* through the up-mix needs the gesture path to
+be airtight: before the guards, one missing resume muted every participant.
+
 `dtx`/`red` are still passed explicitly: it documents intent, and it survives
 the `??= false` branch above if a stereo track ever slips through.
 

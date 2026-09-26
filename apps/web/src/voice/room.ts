@@ -23,6 +23,7 @@ import {
 } from "./remoteAudio.js";
 import type { VoiceQuality } from "./store.js";
 import { useVoiceConnection } from "./store.js";
+import { resumeUpmixContext } from "./upmix.js";
 import { MIC_PUBLISH_OPTIONS, useVoiceSettings } from "./settings.js";
 import { voiceSounds } from "./sounds.js";
 
@@ -552,9 +553,18 @@ export async function listOutputDevices(): Promise<MediaDeviceInfo[]> {
 }
 
 export async function startAudioPlayback(): Promise<void> {
+  // Our shared up-mix context is created outside a user gesture (first remote
+  // track attaches during the join), so Chromium leaves it "suspended" and its
+  // MediaStreamDestination carries SILENCE - which looks exactly like "no sound
+  // at all" once every playback sink is routed through the up-mix. LiveKit's
+  // own startAudio() only resumes LiveKit's context, so resume ours too.
+  resumeUpmixContext();
   if (room !== null) {
     await room.startAudio();
   }
+  // resume() is async and may lose a race with the first attach; retry once the
+  // context reports running.
+  resumeUpmixContext();
 }
 
 let unloadArmed = false;

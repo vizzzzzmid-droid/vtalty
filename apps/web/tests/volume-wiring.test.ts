@@ -114,9 +114,80 @@ class UpmixAudioContext {
   }
 
   resume(): Promise<void> {
+    this.state = "running";
+    this.fire("statechange");
+    return Promise.resolve();
+  }
+
+  /** Minimal event target: the module self-heals on statechange. */
+  private readonly listeners = new Map<string, (() => void)[]>();
+
+  addEventListener(type: string, listener: () => void): void {
+    const existing = this.listeners.get(type) ?? [];
+    existing.push(listener);
+    this.listeners.set(type, existing);
+  }
+
+  private fire(type: string): void {
+    for (const listener of this.listeners.get(type) ?? []) {
+      listener();
+    }
+  }
+
+  /** Simulate a context that is suspended until a real user gesture. */
+  suspend(): void {
+    this.state = "suspended";
+    this.fire("statechange");
+  }
+}
+
+/** Fake context that never leaves "suspended" (no user gesture yet). */
+class SuspendedAudioContext extends UpmixAudioContext {
+  constructor() {
+    super();
+    this.state = "suspended";
+  }
+
+  override resume(): Promise<void> {
     return Promise.resolve();
   }
 }
+
+describe("up-mix context suspension (no-audio regression)", () => {
+  it("falls back to the direct attach instead of routing through a dead context", () => {
+    const original = (globalThis as { AudioContext?: unknown }).AudioContext;
+    (globalThis as { AudioContext?: unknown }).AudioContext = SuspendedAudioContext;
+    UpmixAudioContext.instances = [];
+    resetUpmixContext();
+    try {
+      const element = attachRemoteAudio(fakeTrack({ mono: true }), "user-suspended");
+      expect(element).not.toBeNull();
+      // A suspended context delivers SILENCE, so nothing may be routed through
+      // it: the context exists but stays graph-less and the element keeps
+      // LiveKit's own stream.
+      const ctx = UpmixAudioContext.instances.at(-1);
+      expect(ctx?.state).toBe("suspended");
+      expect(ctx?.edges).toEqual([]);
+      expect(ctx?.outputs).toEqual([]);
+      // The element keeps LiveKit's own attached stream, not a destination
+      // track from the dead context.
+      expect(ctx?.outputs).not.toContain(element?.srcObject);
+    } finally {
+      resetUpmixContext();
+      (globalThis as { AudioContext?: unknown }).AudioContext = original;
+    }
+  });
+
+  it("resumes a suspended context on the statechange transition", async () => {
+    await withUpmixContext((get) => {
+      const element = attachRemoteAudio(fakeTrack({ mono: true }), "user-heal");
+      expect(element).not.toBeNull();
+      // Chrome re-suspends the context; the module must bring it back itself.
+      get().suspend();
+      expect(get().state).toBe("running");
+    });
+  });
+});
 
 /** Install the fake context, run `fn`, then restore the global. */
 async function withUpmixContext(fn: (get: () => UpmixAudioContext) => void): Promise<void> {
