@@ -5,7 +5,7 @@ import { describe, expect, it, beforeEach, vi } from "vitest";
 import { ConnectionQuality } from "livekit-client";
 import { VOICE_SETTINGS_DEFAULTS, voiceSettingsSchema } from "@vitality/shared";
 import { qualityDots, useVoiceConnection } from "../src/voice/store.js";
-import { useVoiceSettings, type NoiseMode } from "../src/voice/settings.js";
+import { MIC_PUBLISH_OPTIONS, useVoiceSettings, type NoiseMode } from "../src/voice/settings.js";
 
 const chainSource = readFileSync(
   resolve(process.cwd(), "src/voice/chain.ts"),
@@ -236,6 +236,80 @@ describe("DeepFilter node construction failures are recoverable", () => {
     const after = deepFilterSource.slice(construct);
     expect(after).toContain("} catch {");
     expect(after).toContain("throw new DeepFilterUnavailableError(");
+  });
+});
+
+describe("microphone publish quality (Opus)", () => {
+  it("pins an explicit high-quality bitrate above the SDK default", () => {
+    // LiveKit's publishDefaults use AudioPresets.music = 48 kbps. We ship
+    // 64 kbps, matching Discord's voice floor.
+    expect(MIC_PUBLISH_OPTIONS.audioPreset.maxBitrate).toBe(64000);
+    expect(MIC_PUBLISH_OPTIONS.audioPreset.maxBitrate).toBeGreaterThan(48000);
+    // Must be at least Discord's 64 kbps floor, never the phone-grade preset.
+    expect(MIC_PUBLISH_OPTIONS.audioPreset.maxBitrate).toBeGreaterThanOrEqual(64000);
+    expect(MIC_PUBLISH_OPTIONS.audioPreset.maxBitrate).not.toBe(12000);
+    expect(MIC_PUBLISH_OPTIONS.audioPreset.maxBitrate).not.toBe(24000);
+  });
+
+  it("enables DTX and RED explicitly (stereo publishing force-disables both)", () => {
+    // livekit-client 2.22.3 sets `opts.dtx = false; opts.red = false` for
+    // stereo tracks when they are undefined, which silently costs us packet
+    // loss concealment. Passing them explicitly is the fix.
+    expect(MIC_PUBLISH_OPTIONS.dtx).toBe(true);
+    expect(MIC_PUBLISH_OPTIONS.red).toBe(true);
+  });
+
+  it("never negotiates a stereo voice track", () => {
+    expect(MIC_PUBLISH_OPTIONS.forceStereo).toBe(false);
+  });
+
+  it("applies the publish options at every publish site", () => {
+    // Both the initial join and the rebuild-on-change path must publish with
+    // the same quality profile, or a mid-call device switch silently degrades.
+    // `(?<!n)` excludes unpublishTrack(), which contains the same substring.
+    const publishSites = roomSource.match(/(?<!n)publishTrack\(/g) ?? [];
+    expect(publishSites.length).toBe(2);
+    const spreads = roomSource.match(/\.\.\.MIC_PUBLISH_OPTIONS/g) ?? [];
+    expect(spreads.length).toBe(publishSites.length);
+  });
+});
+
+describe("mic capture constraints", () => {
+  it("captures 48 kHz mono for Opus", () => {
+    // Anything else forces a resample on the way in, and a stereo track gets
+    // the DTX/RED treatment described above.
+    expect(chainSource).toContain("sampleRate: 48000");
+    expect(chainSource).toContain("channelCount: 1");
+  });
+
+  it("keeps the browser stages off for neural modes only", () => {
+    // Standard mode still uses the browser's own processing; neural modes
+    // must not be double-processed.
+    expect(chainSource).toMatch(
+      /if \(options\.noiseMode === "standard"\)[\s\S]*?constraints\.noiseSuppression = options\.noiseSuppression/,
+    );
+    expect(chainSource).toContain("constraints.noiseSuppression = false");
+  });
+});
+
+describe("gain staging does not clip", () => {
+  it("limits the signal before the MediaStreamDestination", () => {
+    // The input-volume slider reaches 200%, so gain can exceed full scale.
+    // The destination converts to 16-bit PCM and hard-clips -> crackling.
+    const gainToDestination = /gain\.connect\(destination\)/.test(chainSource);
+    expect(gainToDestination).toBe(false);
+    expect(chainSource).toContain("createDynamicsCompressor()");
+    expect(chainSource).toContain("limiter.threshold.value = -6");
+    expect(chainSource).toMatch(/gain\.connect\(limiter\)/);
+    expect(chainSource).toMatch(/limiter\.connect\(destination\)/);
+  });
+
+  it("publishes the mono gain node, keeping stereo out of the encoded track", () => {
+    // The stereo up-mix exists only so local loopback monitoring is centred;
+    // it must never reach the published track.
+    const stereoMerger = chainSource.match(/stereoTap\.connect\(context\.destination\)/);
+    expect(stereoMerger).not.toBeNull();
+    expect(chainSource).not.toMatch(/merger\.connect\(destination\)/);
   });
 });
 

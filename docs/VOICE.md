@@ -88,8 +88,67 @@ bitrates (VP8/H264, LiveKit screen presets):
 Recommendations for one small VPS: keep the default preset at 1080p30,
 `VOICE_MAX_SHARERS=3`, and viewer opt-in ("Watch stream") always on —
 unwatched streams cost the VPS nothing because viewers never subscribe.
-Audio (Opus ~32 kbps/person) is noise next to video. A 1080p60 share with
+Audio (Opus ~64 kbps/person) is noise next to video. A 1080p60 share with
 10 viewers (~30 Mbps sustained upstream) alone can saturate a budget VPS.
+
+## Voice audio quality profile (Opus)
+
+A real-usage report ("muffled/dull, crackling, occasional stutter, worse than
+Discord") traced to a **stereo-published voice track**, not to the
+noise-suppression chain. The profile is pinned in one place,
+`MIC_PUBLISH_OPTIONS` in `apps/web/src/voice/settings.ts`, and applied at both
+publish sites in `voice/room.ts` (initial join and rebuild-on-change).
+
+| Setting | Value | Why |
+|---------|-------|-----|
+| `audioPreset.maxBitrate` | `64000` | LiveKit's `publishDefaults` use `AudioPresets.music` (48 kbps). Discord voice runs 64–96 kbps; 64 kbps is its floor. At 15 speakers this is ~1 Mbps aggregate, fine for a small VPS. Published as a literal object rather than `AudioPresets.music` so a future SDK default bump cannot silently change our voice quality. |
+| Capture rate | `sampleRate: 48000` | Opus encodes at 48 kHz; capturing anything else forces a resample on the way in. |
+| Capture channels | `channelCount: 1` | A voice track is mono. This is the fix for the reported symptoms — see below. |
+| `forceStereo` | `false` | Pins mono even if a device hands us 2 channels. |
+| `dtx` | `true` | Saves uplink during silence. Passed explicitly (see below). |
+| `red` | `true` | RFC 2198 redundant audio — the packet-loss concealment that repairs the "occasional stutter". Passed explicitly. |
+| Post-gain | `DynamicsCompressor` limiter, threshold −6 dB, ratio 12:1 | The input slider reaches 200%, so gain can exceed full scale; `MediaStreamDestination` hard-clips to 16-bit PCM, which is audible as crackling. Transparent below −6 dBFS, so normal speech is untouched. |
+
+### Why a stereo track caused all three symptoms
+
+`livekit-client` 2.22.3, in `LocalParticipant.publishTrack()`:
+
+```js
+const isStereo = opts.forceStereo ?? (track.getSettings().channelCount === 2 …);
+if (isStereo) {
+  if (opts.dtx === undefined) { log.debug("Opus DTX will be disabled for stereo tracks by default…"); }
+  if (opts.red === undefined) { log.debug("Opus RED will be disabled for stereo tracks by default…"); }
+  opts.dtx ??= false;
+  opts.red ??= false;
+}
+```
+
+Our chain built a `ChannelMergerNode(2)` for **local loopback centring** and
+connected *it* to the `MediaStreamDestination`. That made the published track
+stereo, and then:
+
+- **muffled / missing highs** — the music preset's bitrate is split across two
+  channels, so each channel got roughly half the bits;
+- **stutter** — DTX *and* RED were force-disabled, so nothing concealed lost
+  packets (RED is not Opus-internal FEC; it is the redundancy layer);
+- **crackling** — unrelated to Opus, from the 200% gain clipping (above).
+
+`chain.ts` now publishes the **mono** gain node and uses the merger only as a
+monitoring tap for `hearMyself`. Receivers already centre mono playback
+(`remoteAudio.ts` merges mono into both channels), so nothing is lost.
+
+`dtx`/`red` are still passed explicitly: it documents intent, and it survives
+the `??= false` branch above if a stereo track ever slips through.
+
+### Not changed, and why
+
+- **FEC is not exposed by LiveKit** — for Opus the loss-concealment knob is RED
+  plus the SFU's own jitter buffer; there is no `opusFec` publish option.
+- **Noise suppression is not implicated.** RNNoise/DeepFilterNet process at
+  48 kHz mono with a 128-frame ring buffer; changing them does not affect
+  highs or packet loss. Try Deep vs Enhanced vs Off to confirm on your own mic.
+- **96 kbps** is left on the table deliberately: inaudible for speech above
+  ~64 kbps, and it costs uplink and encode CPU for everyone in the room.
 
 ## How to test (quick)
 1. Two browsers (or a normal + an incognito window) on the same server.
@@ -117,3 +176,4 @@ Audio (Opus ~32 kbps/person) is noise next to video. A 1080p60 share with
 | Stream frozen for viewers | Stopped by sharer cap or moderator | Sharer sees a notice; re-share (or ask for the cap/role) |
 | No system audio in a share | Browser/OS limitation | Chrome offers a tab-audio checkbox in the picker; Firefox/Safari may share video only |
 | Enhanced mode falls back to Standard | No 48 kHz audio, no AudioWorklet, or WASM blocked | Read the in-app notice; check browser console; verify the CSP allows `wasm-unsafe-eval` |
+| Voice muffled, crackles, stutters | Voice track published as stereo, or input gain clipping | Fixed: mono publish + limiter, see "Voice audio quality profile (Opus)" above. Confirm with `chrome://webrtc-internals` → the audio sender's `channels` must read `1` |

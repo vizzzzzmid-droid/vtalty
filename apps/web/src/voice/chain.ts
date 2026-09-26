@@ -48,7 +48,15 @@ export interface MicChain {
  * source is mono.
  */
 export async function buildMicChain(options: MicChainOptions): Promise<MicChain> {
-  const constraints: MediaTrackConstraints = {};
+  const constraints: MediaTrackConstraints = {
+    // Opus encodes at 48 kHz; capturing anything else forces a resample
+    // (quality loss plus CPU) on the way in.
+    sampleRate: 48000,
+    // A voice track is mono. Requesting 1 channel stops the browser from
+    // handing us a stereo stream, which would otherwise be published as
+    // stereo Opus (halved per-channel bitrate, DTX/RED disabled).
+    channelCount: 1,
+  };
   if (options.deviceId !== null) {
     constraints.deviceId = { exact: options.deviceId };
   }
@@ -110,7 +118,19 @@ export async function buildMicChain(options: MicChainOptions): Promise<MicChain>
     // Up-mix mono → stereo when noise suppression is active (RNNoise outputs mono).
     // This prevents the "left ear only" symptom on some renderers (Electron/Chromium
     // included). Standard mode may already be stereo; we only up-mix when needed.
-    let finalNode: AudioNode = analyser;
+    // The stereo up-mix below is for LOCAL LOOPBACK MONITORING ONLY and must
+    // never reach the published track. A stereo publish is what caused the
+    // reported "muffled + crackling" voice:
+    //   - Opus splits the music-preset bitrate across two channels, so each
+    //     channel gets ~half the bits -> dull, high-frequency-poor voice.
+    //   - livekit-client disables Opus DTX and RED for stereo tracks unless
+    //     they are passed explicitly (they override publishDefaults), and RED
+    //     is the FEC-style redundancy that repairs packet loss. Without RED
+    //     every lost packet becomes an audible dropout/stutter.
+    // Mono publishing keeps DTX+RED on and doubles the per-channel bitrate.
+    // Receivers already centre mono playback (remoteAudio merges mono into
+    // both channels), so nothing is lost by sending mono.
+    let stereoTap: AudioNode | null = null;
     if (isNeuralMode(options.noiseMode) || options.noiseSuppression) {
       try {
         // Detect mono from the TRACK, not from the GainNode: a GainNode's
@@ -124,9 +144,9 @@ export async function buildMicChain(options: MicChainOptions): Promise<MicChain>
           // Feed the SAME mono source into BOTH inputs so it is centred.
           gain.connect(merger, 0, 0);
           gain.connect(merger, 0, 1);
-          // Route both channels of the merger to the analyser (for the meter) and destination.
+          // Monitoring tap only; the meter and the published track stay mono.
           merger.connect(analyser);
-          finalNode = merger;
+          stereoTap = merger;
         }
       } catch {
         // channelCount may not be readable yet; fall back to direct connection.
@@ -134,9 +154,28 @@ export async function buildMicChain(options: MicChainOptions): Promise<MicChain>
     }
 
     const destination = context.createMediaStreamDestination();
-    finalNode.connect(destination);
+    // Publish the MONO gain node directly (the analyser is a pass-through tap
+    // used for the mic-level meter), so the encoded track stays single-channel.
+    //
+    // The input-volume slider goes up to 200%, so a boosted mic can drive the
+    // gain past full scale. MediaStreamDestination converts to 16-bit PCM and
+    // hard-clips there, which is audible as crackling. A gentle limiter after
+    // the gain catches that: transparent below -6 dBFS, soft above, so normal
+    // speech is untouched and only overshoot is tamed.
+    const limiter = context.createDynamicsCompressor();
+    limiter.threshold.value = -6;
+    limiter.knee.value = 6;
+    limiter.ratio.value = 12;
+    limiter.attack.value = 0.003;
+    limiter.release.value = 0.25;
+    gain.connect(limiter);
+    limiter.connect(destination);
     if (options.loopback) {
-      finalNode.connect(context.destination);
+      if (stereoTap !== null) {
+        stereoTap.connect(context.destination);
+      } else {
+        gain.connect(context.destination);
+      }
     }
 
     const track = destination.stream.getAudioTracks()[0];

@@ -23,7 +23,7 @@ import {
 } from "./remoteAudio.js";
 import type { VoiceQuality } from "./store.js";
 import { useVoiceConnection } from "./store.js";
-import { useVoiceSettings } from "./settings.js";
+import { MIC_PUBLISH_OPTIONS, useVoiceSettings } from "./settings.js";
 import { voiceSounds } from "./sounds.js";
 
 type LiveKitModule = typeof import("livekit-client");
@@ -417,6 +417,7 @@ export async function joinVoiceChannel(channelId: string): Promise<void> {
     try {
       micPublication = await next.localParticipant.publishTrack(mic.track, {
         source: sdk.Track.Source.Microphone,
+        ...MIC_PUBLISH_OPTIONS,
       });
     } catch {
       // Listen-only grants (or revoked speak): stay connected, listen only.
@@ -514,6 +515,7 @@ export async function rebuildMicChain(): Promise<void> {
   try {
     micPublication = await room.localParticipant.publishTrack(fresh.track, {
       source: (await livekit()).Track.Source.Microphone,
+      ...MIC_PUBLISH_OPTIONS,
     });
   } catch (err) {
     chain = previous;

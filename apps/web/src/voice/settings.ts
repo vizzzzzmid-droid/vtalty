@@ -1,7 +1,36 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 
+/**
+ * Explicit microphone publish options.
+ *
+ * LiveKit's `publishDefaults` already use AudioPresets.music (48 kbps) with
+ * dtx/red enabled, but relying on an implicit default is fragile: bumping the
+ * SDK can silently change voice quality. The voice profile is pinned here.
+ *
+ * Bitrate: the effective default is already AudioPresets.music (48 kbps) and
+ * the track is published MONO, so the whole bitrate goes to the single voice
+ * channel (see chain.ts). Discord voice runs 64-96 kbps; we ship 64 kbps,
+ * which matches its floor and keeps the uplink sane on a small VPS with up to
+ * 15 speakers (~1 Mbps aggregate at full talkership). Raising this further
+ * (e.g. 96 kbps) is audibly negligible for speech and only costs CPU/bandwidth.
+ *
+ * DTX + RED: RED (RFC 2198 redundant audio) is what conceals packet loss on a
+ * real network, DTX saves bandwidth during silence. Both stay on. They are
+ * passed EXPLICITLY because livekit-client FORCE-DISABLES both for stereo
+ * tracks when they are undefined (verified in livekit-client 2.22.3), and
+ * because explicit values survive future changes to publishDefaults.
+ */
+export const MIC_PUBLISH_OPTIONS = {
+  audioPreset: { maxBitrate: 64000 },
+  dtx: true,
+  red: true,
+  /** A voice track is never negotiated as stereo Opus. */
+  forceStereo: false,
+} as const;
+
 export type NoiseMode = "off" | "standard" | "enhanced" | "deep";
+
 
 interface VoiceSettings {
   inputDeviceId: string | null;
