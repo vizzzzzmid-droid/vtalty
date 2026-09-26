@@ -13,14 +13,6 @@ const screenSource = readFileSync(
   resolve(process.cwd(), "src/voice/screen.ts"),
   "utf8",
 );
-const upmixSource = readFileSync(
-  resolve(process.cwd(), "src/voice/upmix.ts"),
-  "utf8",
-);
-const remoteAudioSource = readFileSync(
-  resolve(process.cwd(), "src/voice/remoteAudio.ts"),
-  "utf8",
-);
 const chainSource = readFileSync(
   resolve(process.cwd(), "src/voice/chain.ts"),
   "utf8",
@@ -128,33 +120,19 @@ describe("stream audio element", () => {
 // `connect(merger)` lands a mono source on input 0 (left) with the right
 // channel silent. The same source must be fed into BOTH inputs (0 and 1).
 describe("mono→stereo centering (left-ear regression)", () => {
-  it("every playback sink up-mixes through the shared upmix helper", () => {
-    // The centring logic lives in ONE place (upmix.ts) so remote mic audio and
-    // screen-share audio cannot drift apart again.
-    expect(screenSource).toContain("from \"./upmix.js\"");
-    expect(screenSource).toContain("upmixToStereo(mediaStreamTrack)");
-    expect(remoteAudioSource).toContain("from \"./upmix.js\"");
-    expect(remoteAudioSource).toContain("upmixToStereo(mediaStreamTrack)");
-  });
-
-  it("the shared up-mix feeds the source into BOTH merger inputs", () => {
-    expect(upmixSource).toContain("source.connect(merger, 0, 0)");
-    expect(upmixSource).toContain("source.connect(merger, 0, 1)");
+  it("screen-share upmix feeds the source into BOTH merger inputs", () => {
+    expect(screenSource).toContain("source.connect(merger, 0, 0)");
+    expect(screenSource).toContain("source.connect(merger, 0, 1)");
     // No bare connect(merger); STATEMENT (line-start, immediate close paren).
-    expect(upmixSource).not.toMatch(/^\s*\w+\.connect\(merger\);/m);
+    expect(screenSource).not.toMatch(/^\s*\w+\.connect\(merger\);/m);
   });
 
-  it("the shared up-mix keeps genuine stereo sources separated", () => {
+  it("screen-share upmix keeps genuine stereo sources separated", () => {
     // A merger input down-mixes stereo to mono; stereo sources must go
     // through a ChannelSplitter so L and R land on inputs 0 and 1.
-    expect(upmixSource).toContain("createChannelSplitter(2)");
-    expect(upmixSource).toContain("splitter.connect(merger, 0, 0)");
-    expect(upmixSource).toContain("splitter.connect(merger, 1, 1)");
-  });
-
-  it("falls back to a direct attach when WebAudio is unavailable", () => {
-    // Dropping the participant's audio would be worse than one-ear audio.
-    expect(upmixSource).toContain("return null");
+    expect(screenSource).toContain("createChannelSplitter(2)");
+    expect(screenSource).toContain("splitter.connect(merger, 0, 0)");
+    expect(screenSource).toContain("splitter.connect(merger, 1, 1)");
   });
 
   it("noise-suppression chain upmix feeds the source into BOTH merger inputs", () => {
