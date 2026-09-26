@@ -133,6 +133,112 @@ describe("neural mode detection", () => {
 // keep the vitest import used even if the suite above is trimmed
 void vi;
 
+/**
+ * Regression: the DeepFilterNet worklet is emscripten glue that calls
+ * `new TextDecoder()` at MODULE TOP LEVEL, and TextDecoder does not exist in
+ * AudioWorkletGlobalScope. The polyfill module must therefore be loaded with
+ * addModule() BEFORE the real worklet, in the same context.
+ */
+describe("AudioWorklet TextDecoder polyfill", () => {
+  const shimSource = readFileSync(
+    resolve(process.cwd(), "src/voice/worklet-globals.js"),
+    "utf8",
+  );
+
+  it("actually installs a working TextDecoder when the global is missing", () => {
+    // Run the shipped shim the way an AudioWorkletGlobalScope would: no
+    // TextDecoder, no TextEncoder. Executing it proves the polyfill is valid
+    // JS and not just plausible-looking source.
+    const g = {} as Record<string, unknown>;
+    new Function("globalThis", shimSource)(g);
+    const Decoder = g["TextDecoder"] as new (
+      encoding?: string,
+      options?: { ignoreBOM?: boolean },
+    ) => { decode: (bytes?: Uint8Array) => string };
+
+    expect(typeof Decoder).toBe("function");
+    const decoder = new Decoder("utf-8", { ignoreBOM: true });
+    // ASCII, 2-byte, 3-byte and 4-byte (astral) sequences must decode, since
+    // emscripten decodes UTF-8 error messages out of WASM memory.
+    expect(decoder.decode(new TextEncoder().encode("abc"))).toBe("abc");
+    expect(decoder.decode(new TextEncoder().encode("héllo"))).toBe("héllo");
+    expect(decoder.decode(new TextEncoder().encode("прив"))).toBe("прив");
+    expect(decoder.decode(new TextEncoder().encode("🙂"))).toBe("🙂");
+    expect(decoder.decode()).toBe("");
+  });
+
+  it("honours ignoreBOM and replaces invalid bytes without throwing", () => {
+    const g = {} as Record<string, unknown>;
+    new Function("globalThis", shimSource)(g);
+    const Decoder = g["TextDecoder"] as new (
+      encoding?: string,
+      options?: { ignoreBOM?: boolean; fatal?: boolean },
+    ) => { decode: (bytes?: Uint8Array) => string };
+
+    expect(new Decoder("utf-8", { ignoreBOM: true })
+      .decode(new Uint8Array([0xef, 0xbb, 0xbf, 0x41]))).toBe("A");
+    // Non-fatal mode must not throw on a truncated/invalid sequence.
+    expect(() => new Decoder("utf-8", { fatal: false })
+      .decode(new Uint8Array([0xc3]))).not.toThrow();
+    // ...and fatal mode must throw (emscripten relies on this).
+    expect(() => new Decoder("utf-8", { fatal: true })
+      .decode(new Uint8Array([0xc3]))).toThrow();
+  });
+
+  it("installs TextEncoder too (other emscripten worklets use it)", () => {
+    const g = {} as Record<string, unknown>;
+    new Function("globalThis", shimSource)(g);
+    const Encoder = g["TextEncoder"] as new () => {
+      encode: (input: string) => Uint8Array;
+    };
+    expect(Array.from(new Encoder().encode("a€"))).toEqual([0x61, 0xe2, 0x82, 0xac]);
+    expect(Array.from(new Encoder().encode("é"))).toEqual([0xc3, 0xa9]);
+  });
+
+  it("never clobbers a real TextDecoder", () => {
+    // The shim is a no-op when the global already exists (e.g. a browser that
+    // does expose it), so it must not replace a working implementation.
+    const native = function TextDecoder() {};
+    (native as unknown as { decode: () => string }).decode = () => "native";
+    const g = { TextDecoder: native } as Record<string, unknown>;
+    new Function("globalThis", shimSource)(g);
+    expect(g["TextDecoder"]).toBe(native);
+  });
+
+  it("is loaded with addModule BEFORE the DeepFilter worklet", () => {
+    // Order matters: globals set by one addModule() call are visible to the
+    // next one in the same AudioWorkletGlobalScope, but not the reverse.
+    const shimIndex = deepFilterSource.indexOf("addModule(workletGlobalsUrl)");
+    const workletIndex = deepFilterSource.indexOf("addModule(deepfilterWorkletUrl)");
+    expect(shimIndex).toBeGreaterThan(-1);
+    expect(workletIndex).toBeGreaterThan(-1);
+    expect(shimIndex).toBeLessThan(workletIndex);
+    expect(deepFilterSource).toContain('import workletGlobalsUrl from "./worklet-globals.js?url"');
+  });
+});
+
+/**
+ * Regression: when the worklet module failed to register its processor,
+ * `new AudioWorkletNode(...)` throws a raw DOM NotSupportedError. That escaped
+ * the DeepFilterUnavailableError contract, so the Deep -> Enhanced -> Standard
+ * fallback never ran and joining the voice channel failed outright.
+ */
+describe("DeepFilter node construction failures are recoverable", () => {
+  it("wraps AudioWorkletNode construction in the unavailable error", () => {
+    const construct = deepFilterSource.indexOf("new AudioWorkletNode(");
+    expect(construct).toBeGreaterThan(-1);
+    // Exactly one construction site, so there is nothing left unguarded.
+    expect(deepFilterSource.split("new AudioWorkletNode(").length - 1).toBe(1);
+    // It must sit inside a try whose catch rethrows the typed error the caller
+    // falls back on.
+    const before = deepFilterSource.slice(0, construct);
+    expect(before.lastIndexOf("try {")).toBeGreaterThan(-1);
+    const after = deepFilterSource.slice(construct);
+    expect(after).toContain("} catch {");
+    expect(after).toContain("throw new DeepFilterUnavailableError(");
+  });
+});
+
 describe("qualityDots", () => {
   it("maps connection quality to dot counts", () => {
     expect(qualityDots(ConnectionQuality.Excellent)).toBe(3);

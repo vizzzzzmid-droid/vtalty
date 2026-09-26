@@ -1,5 +1,6 @@
 import deepfilterWorkletUrl from "@lofcz/deepfilternet-web/worklet?url";
 import deepfilterWasmUrl from "@lofcz/deepfilternet-web/df_bg.wasm?url";
+import workletGlobalsUrl from "./worklet-globals.js?url";
 
 /**
  * DeepFilterNet3 (neural, 48 kHz mono) as a fourth noise-suppression mode.
@@ -87,20 +88,36 @@ export async function createDeepFilterNode(
   }
   const wasmModule = await loadWasmModule();
   try {
+    // The DeepFilterNet build is emscripten glue that calls `new TextDecoder()`
+    // at module top level, and TextDecoder does NOT exist in
+    // AudioWorkletGlobalScope — addModule() would throw ReferenceError and no
+    // processor would be registered. Load our polyfill first: globals set by one
+    // addModule() call are visible to the next one in the same context.
+    await context.audioWorklet.addModule(workletGlobalsUrl);
     await context.audioWorklet.addModule(deepfilterWorkletUrl);
   } catch {
     throw new DeepFilterUnavailableError("DEEPFILTER_UNAVAILABLE");
   }
-  return new AudioWorkletNode(context, PROCESSOR_NAME, {
-    numberOfInputs: 1,
-    numberOfOutputs: 1,
-    channelCount: 1,
-    channelCountMode: "explicit",
-    processorOptions: {
-      wasmModule,
-      attenuationLimit: attenuationLimitDb,
-    },
-  });
+  // Constructing the node is the SECOND failure point: if the worklet module
+  // threw at top level (or was never registered), addModule() may resolve but
+  // `new AudioWorkletNode` throws NotSupportedError. That is a raw DOM error,
+  // not a DeepFilterUnavailableError, so without this wrapper the caller's
+  // Deep → Enhanced → Standard fallback would never fire and JOINING THE VOICE
+  // CHANNEL would fail outright.
+  try {
+    return new AudioWorkletNode(context, PROCESSOR_NAME, {
+      numberOfInputs: 1,
+      numberOfOutputs: 1,
+      channelCount: 1,
+      channelCountMode: "explicit",
+      processorOptions: {
+        wasmModule,
+        attenuationLimit: attenuationLimitDb,
+      },
+    });
+  } catch {
+    throw new DeepFilterUnavailableError("DEEPFILTER_UNAVAILABLE");
+  }
 }
 
 /** Test hook: forget the cached WASM so fallback paths can be exercised. */
