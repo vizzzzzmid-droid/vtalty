@@ -254,5 +254,75 @@ enabled, not only running the unit tests.
 | Share button missing | Not connected, or role lacks `share_screen` | Join voice first; owner checks Members → role |
 | Stream frozen for viewers | Stopped by sharer cap or moderator | Sharer sees a notice; re-share (or ask for the cap/role) |
 | No system audio in a share | Browser/OS limitation | Chrome offers a tab-audio checkbox in the picker; Firefox/Safari may share video only |
+| Sharer hears viewers echo through the shared audio (web) | Fixed: the share capture requested unrestricted `audio`, so it re-captured our own hidden `<audio>` players | `restrictOwnAudio` is now requested; if it persists, the browser is not Chromium and the picker tab-audio route is needed |
+| Sharer hears viewers echo through the shared audio (desktop) | **Open, platform limit.** Electron uses `audio: "loopback"` (WASAPI device loopback) which by definition includes our own speakers; `restrictOwnAudio` does not reach the main process | Not fixable without changing behaviour — see "Screen-share audio self-echo" below |
 | Enhanced mode falls back to Standard | No 48 kHz audio, no AudioWorklet, or WASM blocked | Read the in-app notice; check browser console; verify the CSP allows `wasm-unsafe-eval` |
 | Voice muffled, crackles, stutters | Voice track published as stereo, or input gain clipping | Fixed: mono publish + limiter, see "Voice audio quality profile (Opus)" above. Confirm with `chrome://webrtc-internals` → the audio sender's `channels` must read `1` |
+
+## Screen-share audio self-echo
+
+### The loop
+
+A viewer hears their own voice back through the shared audio. The cycle is
+entirely inside the sharer's machine, and every hop is something the app does:
+
+1. The viewer speaks → LiveKit → the sharer's client.
+2. The sharer's client plays that voice in the hidden `<audio>` elements from
+   `remoteAudio.ts` (this is normal — it is how you hear anyone at all).
+3. The screen-share capture on the sharer's side picks up **that app-generated
+   audio** along with the content.
+4. The sharer republishes it as the screen-share audio track.
+5. The original viewer hears their own voice returned to them.
+
+So the sharer is not "subscribing to their own stream" — nothing is
+mis-wired in the identity/attach logic. The sound genuinely leaves the
+speakers and comes back in through the capture.
+
+### Web: fixed
+
+`startShare()` in `apps/web/src/voice/screen.ts` used to pass
+`audio: options.withAudio`, i.e. a bare `true`. That means "any audio this tab
+produces", which is precisely the loop above. It now passes
+`{ restrictOwnAudio: true }`, which asks the user agent to filter audio
+produced by *this tab* out of the capture (`systemAudio: "include"` is kept so
+the native picker can still offer real system audio).
+
+`restrictOwnAudio` is a **request, not a guarantee**: it is Chromium-only, and
+older Chromium ignores it. On such browsers the echo persists and the only
+clean workaround is the native "share tab audio" checkbox in the picker, which
+captures a *specific* tab rather than the system.
+
+### Desktop: open, and it needs a decision
+
+`apps/desktop/src/main.ts` handles the capture with
+`session.setDisplayMediaRequestHandler` and passes `audio: "loopback"` in
+`Streams`. That is a **WASAPI device loopback**: it captures the system output
+device, which by definition includes our own speakers. The renderer's
+`audio` constraint never reaches the main process at all — Electron decides —
+and Electron's `Streams.audio` type only accepts `'loopback'`,
+`'loopbackWithMute'` or a `WebFrameMain`, so `restrictOwnAudio` cannot be
+forwarded even if we wanted to.
+
+Concretely: on desktop the self-echo is **not fixed**, and it cannot be fixed
+without changing behaviour. The options, none of which I have applied because
+each trades away something the user currently has:
+
+- **`loopbackWithMute`** — mutes the app's own audio while the share is
+  running. Removes the loop, but the sharer cannot hear anyone during their
+  own share (they can still talk, they just cannot listen). This is what
+  Discord does for screen-share-with-audio.
+- **Capture a specific `WebFrameMain` instead of `loopback`** — captures one
+  other app's audio rather than the whole device. No loop, but it requires
+  picking which app to record and loses "share whatever is playing".
+- **Drop screen-share audio on desktop entirely** — simplest and lossless in
+  terms of the echo, but the feature is gone.
+- **Mute the hidden remote-audio elements during a share** (an app-side
+  workaround) — the sharer hears nothing while sharing, same as
+  `loopbackWithMute` but implemented in our code and also affecting the
+  screen-share audio the sharer plays for themselves.
+
+This is a product decision, so it is left open on purpose. Say which of the
+four you want and I will implement it. **The choice must be verified with two
+users in a live call** — the echo depends on the real audio device and on
+whether the sharer is on speakers or headphones, so unit tests cannot confirm
+it, only the two sides of a real room can.

@@ -39,6 +39,29 @@ async function presetFor(id: ScreenPresetId): Promise<VideoPreset> {
   }
 }
 
+/**
+ * Audio constraints for the screen-share capture.
+ *
+ * `restrictOwnAudio` makes the user agent filter audio produced by THIS tab
+ * (our hidden <audio> elements playing remote participants) out of the captured
+ * stream. Without it the sharer re-captures the voices of the very people they
+ * are sharing with, and those people hear themselves echoed back through the
+ * stream: viewer -> SFU -> sharer's speakers -> our tab's audio output ->
+ * screen-share capture -> SFU -> viewer.
+ *
+ * It is a request, not a guarantee: unsupported browsers ignore it, which is
+ * why `systemAudio: "include"` is kept (so the user can still pick real system
+ * audio) and why the residual echo on such browsers is a known issue.
+ */
+function shareAudioConstraints(
+  withAudio: boolean,
+): false | { restrictOwnAudio: true } {
+  if (!withAudio) {
+    return false;
+  }
+  return { restrictOwnAudio: true };
+}
+
 export interface StartShareOptions {
   preset: ScreenPresetId;
   contentHint: ContentHintMode;
@@ -82,7 +105,7 @@ export async function startShare(
   const publication = await room.localParticipant.setScreenShareEnabled(
     true,
     {
-      audio: options.withAudio,
+      audio: shareAudioConstraints(options.withAudio),
       resolution: { ...preset.resolution },
       contentHint: options.contentHint,
       systemAudio: "include",

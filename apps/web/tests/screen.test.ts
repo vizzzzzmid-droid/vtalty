@@ -176,3 +176,39 @@ describe("mono→stereo centering (left-ear regression)", () => {
     expect(chainSource).not.toContain("TEMP-DEBUG");
   });
 });
+
+// Regression: a viewer heard their OWN voice back through the screen-share
+// audio. Confirmed mechanism: the sharer captures app audio, our hidden
+// <audio> elements (remoteAudio.ts) play participants' voices through the
+// speakers, that output is re-captured and republished, and the original
+// viewer gets their own voice back.
+//
+// In the browser the fix is `restrictOwnAudio` (Chromium-only): the user
+// agent filters audio produced by THIS tab out of the captured stream.
+describe("screen-share capture must not loop the app's own audio back", () => {
+  it("requests restrictOwnAudio for the share capture", () => {
+    // A bare `audio: options.withAudio` means "any audio this tab produces",
+    // which is exactly the self-echo loop.
+    expect(screenSource).toContain("restrictOwnAudio");
+    expect(screenSource).not.toMatch(/^\s*audio: options\.withAudio,?$/m);
+  });
+
+  it("never requests unrestricted audio on the share path", () => {
+    // `audio: true` would re-introduce the loop the moment the helper is
+    // refactored, so the capture must go through the constraint helper only.
+    expect(screenSource).not.toMatch(/^\s*audio: true,?$/m);
+    expect(screenSource).toContain("shareAudioConstraints");
+  });
+
+  it("keeps no-audio shares video-only", () => {
+    // withAudio=false must stay `false` (no audio track published at all),
+    // not an empty constraint object.
+    expect(screenSource).toMatch(/if \(!withAudio\) \{\s*return false;/);
+  });
+
+  it("still offers real system audio to the picker", () => {
+    // restrictOwnAudio only filters THIS tab; it must not suppress the
+    // browser's native "share tab/system audio" choice.
+    expect(screenSource).toContain('systemAudio: "include"');
+  });
+});
