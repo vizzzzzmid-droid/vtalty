@@ -458,6 +458,117 @@ CI (Phase 1): lint + typecheck + unit/integration tests on every push.
   `pnpm --filter @vitality/desktop probe:audio-boost`; new wiring pins in
   tests/boost.test.ts (web 78/78); lint/test/build/`-r typecheck` green.
   Live slider check stays manual (docs/MANUAL_TESTS.md volume-boost row).
+- [x] Voice state + permissions bug-hunt (3 confirmed bugs, all server-side;
+  no PTT/desktop changes). **1. A stale `participant_left` wiped presence in
+  the user's NEW channel** (`voice/service.ts`). Root cause: switching
+  channels force-removes the participant from the OLD LiveKit room
+  (`mintVoiceToken` -> `removeParticipant`), so that room's
+  `participant_left` webhook lands AFTER the store already seated them in
+  the new channel; the handler called `voiceStore.remove(identity)`
+  unconditionally, which drops the user from *wherever they sit* — so they
+  vanished from the new channel until the 60 s reconcile resurrected them.
+  Fix: remove only when `userChannelOf(identity) === channel.id` (same
+  verify-the-channel-first pattern as `setMyVoiceFlags`). Regression test:
+  `voice.test.ts` "stale participant_left" (fails without the fix).
+  **2. Lifting a server mute left the participant advertised as muted**
+  (`voice/store.ts` + `service.ts` + `servers/service.ts`). Root cause:
+  `moderateMute` wrote `muted: true` alongside `serverMuted: true`,
+  clobbering the client's own flag, and the unmute only cleared
+  `serverMuted` — nothing makes the victim re-announce (their own state
+  never changed), so an audible, unmuted participant showed the muted icon
+  to everyone until the next toggle/reconnect. Fix: `serverMuted` is now a
+  separate lock that never touches the client's `muted`; the store's
+  force-mute invariant keeps only `deafened => muted`, and BOTH presence
+  projections (the `voice.state` broadcast and the server-state snapshot)
+  publish `muted: seat.muted || seat.serverMuted` via the new
+  `toVoiceParticipant` helper — so the lock still reads as muted to others,
+  a client unmute cannot lift it, and lifting it restores the victim's own
+  state verbatim (a self-muted victim stays muted, which the old code could
+  not do either way). Regression tests: unit `voice.test.ts` (lock does not
+  clobber, self-mute survives the cycle, lock reads muted without a flag) +
+  integration `voice-moderation.test.ts` (unmute restores unmuted; self-mute
+  survives). **3. The 1 s WS voice-flag throttle DROPPED the newest flags**
+  (`ws/gateway.ts`). Root cause: a `voice.state.update` arriving inside the
+  per-socket cooldown was discarded, so a rapid mute -> deafen pair (or a
+  short PTT tap) left the server advertising only the FIRST state until the
+  participant toggled something again. Fix: the newest update is parked per
+  socket and flushed exactly when the cooldown elapses (one timer per
+  socket, cancelled on close); the rate limit still holds against a
+  spamming client. Regression test: `voice.test.ts` "converges on the
+  newest voice flags sent inside the cooldown" (fails without the fix).
+  Investigated and NOT fixed (unconfirmed): livekit-client re-emits
+  `TrackSubscribed` on re-subscribe, so the undeafen path's screen-share
+  audio is re-guarded by the opt-in check — no leak; and the
+  mute/unmute read-modify-write race in `moderateMute` converges (each
+  request's `setFlags` runs in the same continuation as its own LiveKit
+  call, so the store always matches the last LiveKit effect) — only a
+  transient out-of-order broadcast remained, which is self-healing and not
+  deterministically testable. Verified locally: typecheck/lint clean,
+  server 73 unit + 70 integration green (new tests included, each confirmed
+  to fail on the pre-fix code); no live media on this box, so the
+  end-to-end symptoms stay manual (docs/MANUAL_TESTS.md).
+- [x] Voice lifecycle audit — scoped store writes + seat reservations
+  (docs/AI_AUDIT_STATE.md). One defect class remained after the bug-hunt:
+  flag mutations validated for channel A were applied to the participant's
+  *current* seat, so a channel switch landing during an `await` (a webhook,
+  or the LiveKit round-trip in a moderation call) moved the mutation to a
+  channel the caller never checked. store.ts gained `getInChannel` /
+  `setFlagsInChannel` / `removeFromChannel` (all key off the user's CURRENT
+  channel, matching the existing `participant_left` guard); the unpublish,
+  publish, mute, unmute, disconnect and stop-share paths use them.
+  `participant_left` is now guarded by BOTH the channel and the
+  participant sid — a reconnect seats a NEW sid and the old session's leave
+  can land after the new join. `mintVoiceToken` reserves the seat under the
+  per-channel lock (`store.admit`) so two concurrent token requests can no
+  longer both observe the same pre-join count; a reconcile sweep
+  (`sweepReservations`, TTL = token TTL + 60 s) reclaims tokens the client
+  never used, and pending seats count toward capacity but never appear in
+  presence. Verified locally: server 76 unit + 75 integration green.
+- [x] Desktop global keys rebind at runtime. `setSetting` persisted new
+  PTT/mute keys but the already-registered OS-level bindings kept the OLD
+  keys until relaunch (`globalShortcut.register` on an accelerator this
+  process already owns is a silent no-op, and the PTT hook captured its
+  keycode in a closure). Fix (ptt.ts): the registered accelerator and the
+  target window live in module state, `registerMuteShortcut` is
+  unregister-then-register (idempotent), the hook compares every event
+  against a live `boundPttKeycode`, and `rebindGlobalKeys(window, before,
+  after, onState)` fans a settings patch out to the three subsystems
+  (accelerator / hook start-stop / keycode swap); ipc.ts calls it from the
+  settings handler, main.ts rebinds on `activate` (the accelerator outlived
+  the destroyed window). The connect UI gained the mute-shortcut toggle and
+  a PTT↔accelerator conflict check, and now reads "Key changes apply
+  immediately". Tests: unit (resolveMuteAccelerator fallback, patch keys,
+  wiring pins) + a real Electron smoke asserting `globalShortcut
+  .isRegistered` flips in-process without a restart (desktop 88 unit).
+- [x] Web realtime audit — message order, session/socket recovery, voice
+  races. **Message list**: `useInfiniteQuery` appends each older page to the
+  END of `pages` while every page is internally ascending, so the flat list
+  rendered newest-first; MessageList now reads the pages BACKWARDS
+  (oldest-first, newest at the bottom) and `appendMessage` appends to
+  pages[0] (the newest page) so a live message lands at the bottom.
+  **Session/socket**: a mid-session access-JWT rotation re-ran the full auth
+  side effects — the socket was torn down and re-opened every 900 s;
+  `applyAuth` now treats an already-authed refresh as a pure token rotation
+  and `connectSocket` is a no-op on a live socket; logout clears the query
+  cache (a second account on a shared browser saw the first's messages
+  until the refetch landed); a reconnect now invalidates `["messages"]` too
+  (state/servers/unread were refetched but the open channel rendered
+  stale); `lastSeq` resets per connection (a stale claim would lie to gap
+  replay the moment the server implements it) and the reconnect announces
+  the EFFECTIVE muted (deafen/PTT folded in). **Voice**:
+  `joinVoiceChannel` no longer early-returns while another channel's join
+  is in flight — an epoch tags each attempt and a superseded join discards
+  its room (never clobbering the newer join's state), so the last-clicked
+  channel wins while a duplicate click on the same in-flight channel still
+  collapses; deafen no longer (un)subscribes screen-share audio (tile-owned
+  and opt-in) — undeafen used to pull in every sharer's stream audio until
+  the next `TrackSubscribed`. Typing indicators now expire via a re-armed
+  timer (the store only re-renders subscribers on a write, so "X is typing…"
+  otherwise stuck until someone typed in that channel again) and StreamTile
+  runs the attach teardowns (the centring graph + its muted keeper `<audio>`
+  leaked into document.body once per watch cycle and per fullscreen toggle).
+  Verified locally: web 168/168 unit + `vite build`; two-client checks stay
+  manual (docs/MANUAL_TESTS.md).
 ## 8. Known issues / risks
 
 - `@sapphi-red/web-noise-suppressor` 0.4.1 (MIT) verified with the Vite 8
