@@ -17,9 +17,15 @@ import {
 import { getMembership, requirePermission } from "../../lib/permissions.js";
 import { checkUserRateLimit } from "../../lib/rate-limit.js";
 import { broadcastToServers } from "../../ws/hub.js";
-import { diffVoicePresence, voiceStore } from "./store.js";
+import { diffVoicePresence, toVoiceParticipant, voiceStore } from "./store.js";
 
 const VOICE_TOKEN_TTL_SECONDS = 600;
+/**
+ * How long a minted token may hold a reserved seat without the client
+ * joining. Equal to the token TTL plus a margin: the sweep only reclaims
+ * slots from requests that will never be usable anyway.
+ */
+const RESERVATION_TTL_MS = (VOICE_TOKEN_TTL_SECONDS + 60) * 1000;
 
 export interface VoiceGrantFlags {
   speak: boolean;
@@ -68,13 +74,9 @@ async function findVoiceChannel(db: Db, channelId: string) {
 
 async function broadcastVoice(db: Db, channelId: string): Promise<void> {
   const channel = await findVoiceChannel(db, channelId);
-  const participants = voiceStore.channelParticipants(channelId).map((seat) => ({
-    userId: seat.userId,
-    muted: seat.muted,
-    deafened: seat.deafened,
-    sharingScreen: seat.sharingScreen,
-    serverMuted: seat.serverMuted,
-  }));
+  const participants = voiceStore
+    .channelParticipants(channelId)
+    .map((seat) => toVoiceParticipant(seat));
   broadcastToServers([channel.serverId], "voice.state", {
     channelId,
     participants,
@@ -95,27 +97,35 @@ export async function mintVoiceToken(
   checkUserRateLimit(`voice-token:${userId}`, 30, 60_000);
   const channel = await findVoiceChannel(db, channelId);
   const membership = await requirePermission(db, userId, channel.serverId, "connect");
-  if (voiceStore.count(channelId) >= env.VOICE_MAX_PARTICIPANTS) {
+
+  // Serialize admission per channel. The capacity check and the reservation
+  // are a check-then-act pair: without the lock, two concurrent token
+  // requests both observe the same pre-join count and both succeed,
+  // overflowing the channel once both clients connect. The reservation
+  // makes the accepted request immediately visible in `count()` so every
+  // later request sees the slot taken.
+  const admission = await withChannelLock(channelId, () =>
+    voiceStore.admit(channelId, userId, env.VOICE_MAX_PARTICIPANTS),
+  );
+  if (!admission.admitted) {
     throw new HttpError(403, "CHANNEL_FULL", "Voice channel is full");
   }
 
-  // One session per user: evict from any other channel first. The client
-  // leaves the old LiveKit room on token receipt; the removal call below
-  // force-drops stragglers (best effort — webhooks/reconcile converge).
-  const previous = voiceStore.userChannelOf(userId);
-  if (previous !== null && previous !== channelId) {
-    voiceStore.remove(userId);
-    await broadcastVoiceSafe(db, previous);
+  // One session per user: the reservation evicted any other channel's seat
+  // (admit does that atomically). The client leaves the old LiveKit room on
+  // token receipt; the removal call below force-drops stragglers
+  // (best effort — webhooks/reconcile converge).
+  if (admission.evictedFrom !== null) {
+    await broadcastVoiceSafe(db, admission.evictedFrom);
     try {
-      await livekit.removeParticipant(previous, userId);
+      await livekit.removeParticipant(admission.evictedFrom, userId);
     } catch {
-      // Converges via webhook/reconcile; membership change already applied.
+      // Converges via webhook/reconcile; store state already applied.
     }
   }
 
-  const speak = membership.flags.speak;
   const grant = voiceGrantsFor({
-    speak,
+    speak: membership.flags.speak,
     shareScreen: membership.flags.share_screen,
   });
   const userRows = await db
@@ -164,6 +174,7 @@ export async function handleWebhookEvent(
   identity: string | null,
   screenSource: boolean,
   trackSid: string | null = null,
+  participantSid: string | null = null,
 ): Promise<WebhookSummary> {
   void livekit;
   void env;
@@ -182,14 +193,34 @@ export async function handleWebhookEvent(
 
   switch (eventName) {
     case "participant_joined": {
-      // Defense in depth: only server members may appear in presence
-      // (joining already required our signed token, but webhooks are the
-      // trust boundary for presence).
+      // Defense in depth: only server members with the `connect` permission
+      // may appear in presence. Joining already required our signed token,
+      // but the permission may have been revoked between the mint and this
+      // webhook (the token TTL outlives a role change); webhooks are the
+      // trust boundary for presence, so re-verify here.
       const membership = await getMembership(db, identity, channel.serverId);
-      if (membership === null) {
+      if (membership === null || !membership.flags.connect) {
+        // Drop the reservation the mint created (if any) and force the
+        // participant out of the room. Never advertise them in presence.
+        // Only THIS channel's seat is ours to drop: the webhook may be
+        // stale, and the user may be legitimately seated elsewhere.
+        if (voiceStore.userChannelOf(identity) === channel.id) {
+          voiceStore.remove(identity);
+        }
+        try {
+          await livekit.removeParticipant(channel.id, identity);
+        } catch {
+          // Best effort; no seat exists either way.
+        }
         return { event: eventName, channelId: channel.id, changed: false };
       }
-      const { evictedFrom } = voiceStore.join(channel.id, identity);
+      // A real join clears the mint-time reservation: the slot is now held
+      // by an actual participant. The sid records WHICH LiveKit session the
+      // seat belongs to (see participant_left).
+      const { evictedFrom } = voiceStore.join(channel.id, identity, {
+        pending: false,
+        participantSid,
+      });
       if (evictedFrom !== null) {
         await broadcastVoiceSafe(db, evictedFrom);
       }
@@ -197,6 +228,29 @@ export async function handleWebhookEvent(
       return { event: eventName, channelId: channel.id, changed: true };
     }
     case "participant_left": {
+      // Only a leave for the room the user actually sits in drops them.
+      // Switching channels force-removes the participant from their OLD
+      // LiveKit room (see mintVoiceToken), so that room's
+      // `participant_left` arrives after the store has already seated them
+      // in the new channel; removing unconditionally would wipe the new
+      // channel's presence until the periodic reconcile resurrected it.
+      if (voiceStore.userChannelOf(identity) !== channel.id) {
+        return { event: eventName, channelId: channel.id, changed: false };
+      }
+      // And only a leave for the session that owns the seat drops it. A
+      // reconnect seats a NEW participant sid, and LiveKit does not
+      // guarantee the old session's leave arrives before the new session's
+      // join — an out-of-order (or duplicate) stale leave would otherwise
+      // ghost a live participant until the next reconcile.
+      const seated = voiceStore.get(channel.id, identity);
+      if (
+        seated !== null &&
+        participantSid !== null &&
+        seated.participantSid !== null &&
+        seated.participantSid !== participantSid
+      ) {
+        return { event: eventName, channelId: channel.id, changed: false };
+      }
       const removed = voiceStore.remove(identity);
       if (removed === null) {
         return { event: eventName, channelId: channel.id, changed: false };
@@ -218,7 +272,13 @@ export async function handleWebhookEvent(
         return { event: eventName, channelId: channel.id, changed: false };
       }
       if (eventName === "track_unpublished") {
-        const seat = voiceStore.setFlags(identity, { sharingScreen: false });
+        // Scoped: the webhook may be stale (the participant switched
+        // channels between the validation above and this write), and a
+        // leave-style event must never clear a share in a channel the
+        // caller did not verify.
+        const seat = voiceStore.setFlagsInChannel(channel.id, identity, {
+          sharingScreen: false,
+        });
         if (seat === null) {
           return { event: eventName, channelId: channel.id, changed: false };
         }
@@ -260,7 +320,12 @@ export async function handleWebhookEvent(
           }
           return { event: eventName, channelId: channel.id, changed: false };
         }
-        const seat = voiceStore.setFlags(identity, { sharingScreen: true });
+        // Scoped: a `participant_joined` for another channel may have
+        // landed during the membership check above; a share flag must
+        // never be raised in a channel the webhook was not verified for.
+        const seat = voiceStore.setFlagsInChannel(channel.id, identity, {
+          sharingScreen: true,
+        });
         if (seat === null) {
           return { event: eventName, channelId: channel.id, changed: false };
         }
@@ -278,7 +343,10 @@ const SCREEN_SOURCES = new Set([3, 4]); // TrackSource.SCREEN_SHARE/_AUDIO
 /** Single-process per-channel mutex (the store is in-memory too). */
 const channelLocks = new Map<string, Promise<void>>();
 
-function withChannelLock<T>(channelId: string, task: () => Promise<T>): Promise<T> {
+function withChannelLock<T>(
+  channelId: string,
+  task: () => T | Promise<T>,
+): Promise<T> {
   const previous = channelLocks.get(channelId) ?? Promise.resolve();
   let release!: () => void;
   const current = new Promise<void>((resolve) => {
@@ -287,7 +355,7 @@ function withChannelLock<T>(channelId: string, task: () => Promise<T>): Promise<
   channelLocks.set(channelId, current);
   return previous
     .catch(() => undefined)
-    .then(task)
+    .then(() => task())
     .finally(() => {
       if (channelLocks.get(channelId) === current) {
         channelLocks.delete(channelId);
@@ -322,21 +390,36 @@ export async function receiveWebhook(
     event.participant?.identity ?? null,
     screenSource,
     event.track?.sid ?? null,
+    event.participant?.sid ?? null,
   );
 }
 
-/** Client flag update: accepted only for current participants. */
+/**
+ * Client flag update: accepted only for a participant of THAT channel.
+ *
+ * The channel is resolved and compared BEFORE any state changes — a stale or
+ * forged `channelId` must not be able to flip the user's flags in whatever
+ * channel they actually sit in. `voiceStore.setFlags` mutates in-memory state,
+ * so validating only afterwards would already have applied the change.
+ */
 export async function setMyVoiceFlags(
   db: Db,
   userId: string,
   channelId: string,
   flags: { muted: boolean; deafened: boolean },
 ): Promise<boolean> {
-  const seat = voiceStore.setFlags(userId, flags);
-  if (seat === null || seat.channelId !== channelId) {
+  // 1. The user's current channel — the only channel they may update.
+  if (voiceStore.userChannelOf(userId) !== channelId) {
     return false;
   }
-  await broadcastVoice(db, channelId);
+  // 2. Only now mutate. The store enforces deafened/serverMuted => muted.
+  const seat = voiceStore.setFlags(userId, flags);
+  if (seat === null) {
+    return false;
+  }
+  // 3. Broadcast only for the verified channel (best effort: a concurrent
+  // channel deletion is healed by the next reconcile/voice.state event).
+  await broadcastVoiceSafe(db, channelId);
   return true;
 }
 
@@ -364,7 +447,13 @@ export async function moderateMute(
         throw new HttpError(502, "LIVEKIT_ERROR", "LiveKit mute failed");
       }
     }
-    voiceStore.setFlags(targetUserId, { serverMuted: true, muted: true });
+    // Only the lock flips: the participant's own `muted` flag is their
+    // state and must survive the lock so that lifting it restores it.
+    // Scoped: the seat was verified for THIS channel above, but a
+    // `participant_joined` webhook may have re-seated the user during the
+    // LiveKit round-trip — the moderator's lock must not follow them into
+    // a channel this call never authorized.
+    voiceStore.setFlagsInChannel(channelId, targetUserId, { serverMuted: true });
   } else {
     const audioSid = await publishedAudioSid(livekit, channelId, targetUserId);
     if (audioSid !== null) {
@@ -374,7 +463,7 @@ export async function moderateMute(
         throw new HttpError(502, "LIVEKIT_ERROR", "LiveKit unmute failed");
       }
     }
-    voiceStore.setFlags(targetUserId, { serverMuted: false });
+    voiceStore.setFlagsInChannel(channelId, targetUserId, { serverMuted: false });
   }
   await broadcastVoice(db, channelId);
 }
@@ -415,7 +504,13 @@ export async function moderateDisconnect(
   } catch {
     throw new HttpError(502, "LIVEKIT_ERROR", "LiveKit disconnect failed");
   }
-  voiceStore.remove(targetUserId);
+  // Scoped removal: the participant may have switched channels during the
+  // LiveKit round-trip above, and this disconnect was authorized for the
+  // channel named by the moderator. Dropping them from their CURRENT
+  // channel would leave the mic flowing at the SFU while presence says
+  // they are gone. Best effort when they moved: the webhook for the room
+  // this call did empty still converges the store.
+  voiceStore.removeFromChannel(channelId, targetUserId);
   await broadcastVoice(db, channelId);
 }
 
@@ -490,7 +585,7 @@ export async function stopUserShare(
       throw new HttpError(502, "LIVEKIT_ERROR", "LiveKit stop-share failed");
     }
   }
-  voiceStore.setFlags(targetUserId, { sharingScreen: false });
+  voiceStore.setFlagsInChannel(channelId, targetUserId, { sharingScreen: false });
   await broadcastVoice(db, channelId);
   return true;
 }
@@ -526,7 +621,9 @@ export async function enforceServerVoiceAccess(
     .from(channels)
     .where(and(eq(channels.serverId, serverId), eq(channels.type, "voice")));
   for (const channel of voiceChannels) {
-    for (const seat of voiceStore.channelParticipants(channel.id)) {
+    for (const seat of voiceStore.channelParticipants(channel.id, {
+      includePending: true,
+    })) {
       const membership = await getMembership(db, seat.userId, serverId);
       if (membership === null || !membership.flags.connect) {
         await removeFromVoice(db, livekit, serverId, seat.userId);
@@ -573,7 +670,12 @@ export async function reconcileVoice(
       summary.errors += 1;
       continue;
     }
-    const stored = voiceStore.channelParticipants(channel.id).map((seat) => seat.userId);
+    // Pending reservations are deliberately invisible to the diff: their
+    // owner is not in LiveKit (yet), so they would otherwise be classified
+    // as ghosts and dropped. The sweep below reclaims expired ones.
+    const stored = voiceStore
+      .channelParticipants(channel.id)
+      .map((seat) => seat.userId);
     const { ghosts, missing } = diffVoicePresence(
       live.map((participant) => participant.identity),
       stored,
@@ -599,6 +701,13 @@ export async function reconcileVoice(
     if (ghosts.length > 0 || missing.length > 0) {
       await broadcastVoiceSafe(db, channel.id);
     }
+  }
+  // Reclaim seats held by minted tokens the client never used (tab closed
+  // right after the token mint, network failure before connect). Slots must
+  // not stay occupied for the whole token lifetime.
+  for (const channelId of voiceStore.sweepReservations(RESERVATION_TTL_MS)) {
+    summary.ghostsRemoved += 1;
+    await broadcastVoiceSafe(db, channelId);
   }
   return summary;
 }

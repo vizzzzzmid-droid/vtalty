@@ -1,9 +1,14 @@
 import { afterAll, beforeAll, beforeEach, expect, it } from "vitest";
 import type { WebSocket } from "ws";
 import jwt from "jsonwebtoken";
+import { eq } from "drizzle-orm";
 import { serverStateSchema, wsServerEventSchema } from "@vitality/shared";
 import { voiceStore } from "../../src/modules/voice/store.js";
-import { reconcileVoice } from "../../src/modules/voice/service.js";
+import {
+  handleWebhookEvent,
+  reconcileVoice,
+} from "../../src/modules/voice/service.js";
+import { roles } from "../../src/db/schema.js";
 import {
   authHeader,
   describeIf,
@@ -60,11 +65,12 @@ function webhookBody(
   room: string,
   identity: string,
   trackSource?: number,
+  participantSid = "PA_test",
 ): string {
   return JSON.stringify({
     event,
     room: { name: room },
-    participant: { identity, sid: "PA_test" },
+    participant: { identity, sid: participantSid },
     ...(trackSource === undefined
       ? {}
       : { track: { sid: "TR_test", source: trackSource } }),
@@ -421,6 +427,45 @@ describeIf("voice tokens and webhooks", () => {
     expect(first?.participants ?? []).toHaveLength(0);
   });
 
+  it("keeps presence after a stale participant_left for the previous channel", async () => {
+    // Regression: switching channels force-removes the participant from
+    // their OLD LiveKit room, so that room's `participant_left` lands AFTER
+    // the store has already seated them in the new channel. The handler
+    // removed the user from wherever they sat — the new channel — and they
+    // vanished from presence until the periodic reconcile resurrected them.
+    const { owner, serverId, voiceId } = await voiceFixture(ctx);
+    const friend = await addMember(ctx, owner, serverId, "friend");
+    const second = await ctx.app.inject({
+      method: "POST",
+      url: `/api/v1/servers/${serverId}/channels`,
+      headers: authHeader(owner),
+      payload: { name: "second", type: "voice" },
+    });
+    const secondId = (second.json() as { id: string }).id;
+
+    await postWebhook(ctx, webhookBody("participant_joined", voiceId, friend.id));
+    // The switch: the mint evicts the old channel in the store and
+    // force-removes the participant from the old LiveKit room.
+    const mint = await ctx.app.inject({
+      method: "POST",
+      url: `/api/v1/channels/${secondId}/voice-token`,
+      headers: authHeader(friend),
+    });
+    expect(mint.statusCode).toBe(200);
+    await postWebhook(ctx, webhookBody("participant_joined", secondId, friend.id));
+
+    // The old room's leave arrives now — stale by construction.
+    await postWebhook(ctx, webhookBody("participant_left", voiceId, friend.id));
+
+    const voice = await voiceSnapshot(ctx, owner, serverId);
+    const stillThere = voice.find((entry) => entry.channelId === secondId);
+    expect(stillThere?.participants.map((entry) => entry.userId)).toEqual([
+      friend.id,
+    ]);
+    const oldChannel = voice.find((entry) => entry.channelId === voiceId);
+    expect(oldChannel?.participants ?? []).toHaveLength(0);
+  });
+
   it("enforces max participants from env", async () => {
     const tightFake = new FakeLiveKitAdmin();
     const tight = await setup({ livekit: tightFake, voiceMaxParticipants: 1 });
@@ -497,5 +542,273 @@ describeIf("voice tokens and webhooks", () => {
       room: voiceId,
       identity: "00000000-0000-0000-0000-000000000999",
     });
+  });
+
+  it("never exceeds capacity under concurrent token mints", async () => {
+    // Regression: the capacity check was a check-then-act with no
+    // serialization and no reservation, so concurrent token requests all
+    // observed the same pre-join count and every one of them succeeded.
+    const CAPACITY = 3;
+    const raceFake = new FakeLiveKitAdmin();
+    const race = await setup({
+      livekit: raceFake,
+      voiceMaxParticipants: CAPACITY,
+    });
+    try {
+      const owner = await registerUser(race, "owner");
+      const serversRes = await race.app.inject({
+        method: "GET",
+        url: "/api/v1/servers",
+        headers: authHeader(owner),
+      });
+      const serverId = (serversRes.json() as { id: string }[])[0]?.id ?? "";
+      const stateRes = await race.app.inject({
+        method: "GET",
+        url: `/api/v1/servers/${serverId}/state`,
+        headers: authHeader(owner),
+      });
+      const voiceId =
+        serverStateSchema.parse(await stateRes.json()).channels.find(
+          (entry) => entry.type === "voice",
+        )?.id ?? "";
+
+      // Request CAPACITY + 5 tokens at once: no await between the mints.
+      const members: TestUser[] = [];
+      for (let i = 0; i < CAPACITY + 5; i += 1) {
+        const inviteRes = await race.app.inject({
+          method: "POST",
+          url: `/api/v1/servers/${serverId}/invites`,
+          headers: authHeader(owner),
+          payload: {},
+        });
+        const code = (inviteRes.json() as { code: string }).code;
+        members.push(await registerUser(race, `runner-${i}`, code));
+      }
+      const results = await Promise.all(
+        members.map((member) =>
+          race.app
+            .inject({
+              method: "POST",
+              url: `/api/v1/channels/${voiceId}/voice-token`,
+              headers: authHeader(member),
+            })
+            .then((res) => res.statusCode),
+        ),
+      );
+      const admitted = results.filter((code) => code === 200);
+      const rejected = results.filter((code) => code === 403);
+      expect(admitted).toHaveLength(CAPACITY);
+      expect(rejected).toHaveLength(CAPACITY + 5 - CAPACITY);
+    } finally {
+      await teardown(race);
+    }
+  });
+
+  it("converges on the newest voice flags sent inside the cooldown", async () => {
+    // Regression: a `voice.state.update` that arrived within 1s of the
+    // previous one was dropped outright, so a rapid mute -> deafen pair
+    // left the server advertising only "muted" until the participant
+    // toggled something again or the socket reconnected.
+    const { owner, serverId, voiceId } = await voiceFixture(ctx);
+    const friend = await addMember(ctx, owner, serverId, "friend");
+    await postWebhook(ctx, webhookBody("participant_joined", voiceId, friend.id));
+
+    const ticket = await ctx.app.inject({
+      method: "POST",
+      url: "/api/v1/ws-ticket",
+      headers: authHeader(friend),
+    });
+    const ws = await ctx.app.injectWS(
+      `/ws?ticket=${encodeURIComponent((ticket.json() as { ticket: string }).ticket)}`,
+    );
+    try {
+      await new Promise<string>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("no ready")), 5000);
+        ws.on("message", (data: WebSocket.RawData) => {
+          try {
+            const parsed = wsServerEventSchema.safeParse(
+              JSON.parse(data.toString()) as unknown,
+            );
+            if (parsed.success && parsed.data.type === "server.ready") {
+              clearTimeout(timer);
+              resolve("ready");
+            }
+          } catch {
+            // Ignore malformed frames.
+          }
+        });
+      });
+
+      // Two updates back to back: the second must win once the cooldown
+      // flushes, not be discarded.
+      ws.send(
+        JSON.stringify({
+          type: "voice.state.update",
+          channelId: voiceId,
+          muted: true,
+          deafened: false,
+        }),
+      );
+      ws.send(
+        JSON.stringify({
+          type: "voice.state.update",
+          channelId: voiceId,
+          muted: true,
+          deafened: true,
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 1400));
+
+      const voice = await voiceSnapshot(ctx, owner, serverId);
+      expect(voice[0]?.participants[0]).toMatchObject({
+        muted: true,
+        deafened: true,
+      });
+    } finally {
+      ws.close();
+    }
+  });
+
+  it("ignores a stale participant_left from a superseded LiveKit session", async () => {
+    // Regression: a reconnect seats a NEW participant sid, and LiveKit does
+    // not guarantee the old session's leave arrives before the new
+    // session's join. The old leave matched only the channel, so it wiped
+    // the live seat and the participant ghosted out of presence until the
+    // next 60s reconcile resurrected them.
+    const { owner, serverId, voiceId } = await voiceFixture(ctx);
+    const friend = await addMember(ctx, owner, serverId, "friend");
+
+    // The original session joins, drops, and reconnects with a new sid.
+    await postWebhook(
+      ctx,
+      webhookBody("participant_joined", voiceId, friend.id, undefined, "PA_old"),
+    );
+    await postWebhook(
+      ctx,
+      webhookBody("participant_joined", voiceId, friend.id, undefined, "PA_new"),
+    );
+    // The old session's leave lands now — out of order by construction.
+    await postWebhook(
+      ctx,
+      webhookBody("participant_left", voiceId, friend.id, undefined, "PA_old"),
+    );
+
+    const voice = await voiceSnapshot(ctx, owner, serverId);
+    expect(voice[0]?.participants.map((entry) => entry.userId)).toEqual([
+      friend.id,
+    ]);
+  });
+
+  it("removes the participant when the leave's session matches the seat", async () => {
+    const { owner, serverId, voiceId } = await voiceFixture(ctx);
+    const friend = await addMember(ctx, owner, serverId, "friend");
+    await postWebhook(
+      ctx,
+      webhookBody("participant_joined", voiceId, friend.id, undefined, "PA_one"),
+    );
+    // A leave for the seated session is honored.
+    await postWebhook(
+      ctx,
+      webhookBody("participant_left", voiceId, friend.id, undefined, "PA_one"),
+    );
+    expect(await voiceSnapshot(ctx, owner, serverId)).toHaveLength(0);
+  });
+
+  it("ignores voice flags for a channel the user is not in (stale channelId)", async () => {
+    // Regression: setFlags ran before the channelId check, so a stale
+    // (or forged) channelId still flipped the user's flags in the channel
+    // they actually sit in.
+    const { owner, serverId, voiceId } = await voiceFixture(ctx);
+    const friend = await addMember(ctx, owner, serverId, "friend");
+    await postWebhook(ctx, webhookBody("participant_joined", voiceId, friend.id));
+
+    const second = await ctx.app.inject({
+      method: "POST",
+      url: `/api/v1/servers/${serverId}/channels`,
+      headers: authHeader(owner),
+      payload: { name: "second", type: "voice" },
+    });
+    const secondId = (second.json() as { id: string }).id;
+
+    const ticket = await ctx.app.inject({
+      method: "POST",
+      url: "/api/v1/ws-ticket",
+      headers: authHeader(friend),
+    });
+    const ws = await ctx.app.injectWS(
+      `/ws?ticket=${encodeURIComponent((ticket.json() as { ticket: string }).ticket)}`,
+    );
+    try {
+      await new Promise<string>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("no ready")), 5000);
+        ws.on("message", (data: WebSocket.RawData) => {
+          try {
+            const parsed = wsServerEventSchema.safeParse(
+              JSON.parse(data.toString()) as unknown,
+            );
+            if (parsed.success && parsed.data.type === "server.ready") {
+              clearTimeout(timer);
+              resolve("ready");
+            }
+          } catch {
+            // Ignore malformed frames.
+          }
+        });
+      });
+
+      // The user is in `voiceId` but announces flags for `secondId`.
+      ws.send(
+        JSON.stringify({
+          type: "voice.state.update",
+          channelId: secondId,
+          muted: true,
+          deafened: true,
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 800));
+
+      // Their real seat is untouched.
+      const voice = await voiceSnapshot(ctx, owner, serverId);
+      const seat = voice.find((entry) => entry.channelId === voiceId)
+        ?.participants[0];
+      expect(seat).toMatchObject({ userId: friend.id, muted: false, deafened: false });
+    } finally {
+      ws.close();
+    }
+  });
+
+  it("drops a join whose connect permission was revoked after the mint", async () => {
+    // The token TTL (600s) outlives a role change, so the webhook — the
+    // trust boundary for presence — must re-check membership + `connect`.
+    // Tested at the service level so the role-enforcement eviction does not
+    // mask the handler's own decision.
+    const { owner, serverId, voiceId } = await voiceFixture(ctx);
+    const friend = await addMember(ctx, owner, serverId, "friend");
+    // A mint reserved the seat (mintVoiceToken path).
+    voiceStore.join(voiceId, friend.id, {
+      pending: true,
+      reservedAt: Date.now(),
+    });
+
+    // Revoke connect directly in the DB (any role change would do).
+    await ctx.db.db
+      .update(roles)
+      .set({ connect: false })
+      .where(eq(roles.serverId, serverId));
+
+    const summary = await handleWebhookEvent(
+      ctx.db.db,
+      fake,
+      ctx.env,
+      "participant_joined",
+      voiceId,
+      friend.id,
+      false,
+    );
+    expect(summary.changed).toBe(false);
+    // No presence entry and the reservation is reclaimed.
+    expect(await voiceSnapshot(ctx, owner, serverId)).toHaveLength(0);
+    expect(voiceStore.userChannelOf(friend.id)).toBeNull();
+    expect(fake.removed).toContainEqual({ room: voiceId, identity: friend.id });
   });
 });

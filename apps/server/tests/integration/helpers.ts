@@ -138,6 +138,16 @@ export class FakeLiveKitAdmin implements LiveKitAdmin {
   failRemove = false;
   failMute = false;
 
+  /**
+   * Test hooks fired at the START of the matching admin call, so a test can
+   * interleave a webhook (a channel switch) in the middle of a moderation
+   * flow. Routes capture the fake at build time, so swapping
+   * `app.livekit` later has no effect — these callbacks reach the live
+   * instance instead.
+   */
+  onListParticipants?: (room: string) => void;
+  onRemoveParticipant?: (room: string, identity: string) => void;
+
   join(
     room: string,
     identity: string,
@@ -158,6 +168,7 @@ export class FakeLiveKitAdmin implements LiveKitAdmin {
     if (this.failList) {
       throw new Error("livekit down");
     }
+    this.onListParticipants?.(room);
     const participants = this.rooms.get(room);
     if (participants === undefined) {
       return [];
@@ -173,6 +184,7 @@ export class FakeLiveKitAdmin implements LiveKitAdmin {
     if (this.failRemove) {
       throw new Error("livekit down");
     }
+    this.onRemoveParticipant?.(room, identity);
     this.rooms.get(room)?.delete(identity);
     this.removed.push({ room, identity });
   }

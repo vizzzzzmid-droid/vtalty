@@ -239,8 +239,12 @@ export async function deleteChannel(
   const existing = await findChannelOr404(db, channelId);
   await requirePermission(db, actorId, existing.serverId, "manage_channels");
   // Drop voice participants first so deleting a live voice channel cannot
-  // strand anyone in a room that no longer exists.
-  for (const seat of voiceStore.channelParticipants(channelId)) {
+  // strand anyone in a room that no longer exists. Pending reservations
+  // (minted token, not joined yet) are dropped too — their slot belongs to
+  // a room that is going away.
+  for (const seat of voiceStore.channelParticipants(channelId, {
+    includePending: true,
+  })) {
     try {
       await livekit.removeParticipant(channelId, seat.userId);
     } catch {

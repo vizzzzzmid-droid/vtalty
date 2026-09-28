@@ -26,7 +26,7 @@ import {
 } from "../../ws/hub.js";
 import { syncSubscriptions } from "../members/service.js";
 import { avatarUrlFor } from "../users/service.js";
-import { voiceStore } from "../voice/store.js";
+import { toVoiceParticipant, voiceStore } from "../voice/store.js";
 
 export interface ServerSummary {
   id: string;
@@ -308,13 +308,9 @@ export async function getServerState(
         .filter((row) => row.type === "voice")
         .map((row) => ({
           channelId: row.id,
-          participants: voiceStore.channelParticipants(row.id).map((seat) => ({
-            userId: seat.userId,
-            muted: seat.muted,
-            deafened: seat.deafened,
-            sharingScreen: seat.sharingScreen,
-            serverMuted: seat.serverMuted,
-          })),
+          participants: voiceStore
+            .channelParticipants(row.id)
+            .map((seat) => toVoiceParticipant(seat)),
         }))
         .filter((entry) => entry.participants.length > 0),
       readStates: readRows.map((row) => ({
@@ -364,13 +360,15 @@ export async function deleteServer(
     throw forbidden("Only the owner can delete the server");
   }
   // Empty every voice room first: nobody may stay connected to a room whose
-  // channel is about to disappear.
+  // channel is about to disappear. Pending reservations go too.
   const voiceChannels = await db
     .select({ id: channels.id })
     .from(channels)
     .where(and(eq(channels.serverId, serverId), eq(channels.type, "voice")));
   for (const channel of voiceChannels) {
-    for (const seat of voiceStore.channelParticipants(channel.id)) {
+    for (const seat of voiceStore.channelParticipants(channel.id, {
+      includePending: true,
+    })) {
       try {
         await livekit.removeParticipant(channel.id, seat.userId);
       } catch {

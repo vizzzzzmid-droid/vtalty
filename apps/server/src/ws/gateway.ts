@@ -23,6 +23,20 @@ const typingCooldown = new Map<WebSocket, Map<string, number>>();
 const TYPING_COOLDOWN_MS = 3000;
 const voiceFlagTimestamps = new Map<WebSocket, number>();
 const VOICE_FLAG_COOLDOWN_MS = 1000;
+/**
+ * The newest flag update that arrived inside the cooldown (one per socket),
+ * flushed as soon as the cooldown elapses. Dropping it instead would leave
+ * the server with the participant's state from a second ago: a rapid
+ * mute -> deafen pair would stick on "muted" until the next toggle.
+ */
+const voiceFlagPending = new Map<WebSocket, VoiceFlagUpdate>();
+const voiceFlagTimers = new Map<WebSocket, ReturnType<typeof setTimeout>>();
+
+interface VoiceFlagUpdate {
+  channelId: string;
+  muted: boolean;
+  deafened: boolean;
+}
 
 /** Per-socket, per-channel typing throttle (broadcast-storm protection). */
 function typingAllowed(socket: WebSocket, channelId: string): boolean {
@@ -38,6 +52,55 @@ function typingAllowed(socket: WebSocket, channelId: string): boolean {
   }
   perSocket.set(channelId, now);
   return true;
+}
+
+/** Apply one flag update and stamp the cooldown. */
+async function applyVoiceFlags(
+  app: FastifyInstance,
+  deps: AppDeps,
+  socket: WebSocket,
+  userId: string,
+  update: VoiceFlagUpdate,
+): Promise<void> {
+  voiceFlagTimestamps.set(socket, Date.now());
+  voiceFlagPending.delete(socket);
+  const accepted = await setMyVoiceFlags(deps.db, userId, update.channelId, {
+    muted: update.muted,
+    deafened: update.deafened,
+  });
+  if (!accepted) {
+    app.log.debug("ignoring voice flags for non-participant");
+  }
+}
+
+/**
+ * Flush the update that the cooldown parked. Scheduled at most once per
+ * socket; cancelled on close so a dying socket's last flags never land.
+ */
+function scheduleVoiceFlagFlush(
+  app: FastifyInstance,
+  deps: AppDeps,
+  socket: WebSocket,
+  userId: string,
+): void {
+  if (voiceFlagTimers.has(socket)) {
+    return;
+  }
+  const last = voiceFlagTimestamps.get(socket) ?? 0;
+  const delay = Math.max(0, VOICE_FLAG_COOLDOWN_MS - (Date.now() - last));
+  const timer = setTimeout(() => {
+    voiceFlagTimers.delete(socket);
+    const pending = voiceFlagPending.get(socket);
+    if (pending === undefined) {
+      return;
+    }
+    void applyVoiceFlags(app, deps, socket, userId, pending).catch(
+      (err: unknown) => {
+        app.log.warn({ err }, "WS voice flag flush failed");
+      },
+    );
+  }, delay);
+  voiceFlagTimers.set(socket, timer);
 }
 
 async function handleIntent(
@@ -92,19 +155,22 @@ async function handleIntent(
       // Client mic/deafen flags: accepted only for current participants of
       // that channel (forging someone else's state is impossible — the
       // user id always comes from the authenticated socket).
+      const update: VoiceFlagUpdate = {
+        channelId: intent.data.channelId,
+        muted: intent.data.muted,
+        deafened: intent.data.deafened,
+      };
       const now = Date.now();
       const last = voiceFlagTimestamps.get(socket) ?? 0;
       if (now - last < VOICE_FLAG_COOLDOWN_MS) {
+        // Hold the newest state; it is flushed when the cooldown elapses so
+        // the server converges on what the client is in NOW, not what it
+        // was in a second ago.
+        voiceFlagPending.set(socket, update);
+        scheduleVoiceFlagFlush(app, deps, socket, userId);
         break;
       }
-      voiceFlagTimestamps.set(socket, now);
-      const accepted = await setMyVoiceFlags(deps.db, userId, intent.data.channelId, {
-        muted: intent.data.muted,
-        deafened: intent.data.deafened,
-      });
-      if (!accepted) {
-        app.log.debug("ignoring voice flags for non-participant");
-      }
+      await applyVoiceFlags(app, deps, socket, userId, update);
       break;
     }
   }
@@ -161,6 +227,12 @@ async function handleSocket(
   socket.on("close", () => {
     typingCooldown.delete(socket);
     voiceFlagTimestamps.delete(socket);
+    voiceFlagPending.delete(socket);
+    const timer = voiceFlagTimers.get(socket);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      voiceFlagTimers.delete(socket);
+    }
     removeConnection(socket);
   });
   socket.on("error", (err: Error) => {
