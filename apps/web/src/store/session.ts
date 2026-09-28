@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { LoginBody, RegisterBody, User } from "@vitality/shared";
 import { login, logoutServer, register } from "../api/resources.js";
+import { queryClient } from "../api/queryClient.js";
 import {
   getAccessToken,
   setAccessToken,
@@ -24,8 +25,16 @@ interface SessionState {
 }
 
 function applyAuth(user: User, token: string): void {
+  // A refresh of an ALREADY authed session is a token rotation, not a new
+  // session: the access JWT expires every 900 s, so re-establishing the
+  // socket and the settings sync on every rotation would churn a working
+  // session. Only a cold start or a re-login after logout runs them.
+  const established = useSessionStore.getState().status === "authed";
   setAccessToken(token);
   useSessionStore.setState({ user, accessToken: token, status: "authed" });
+  if (established) {
+    return;
+  }
   connectSocket();
   startSettingsSync(user.id);
 }
@@ -34,6 +43,10 @@ function applyGuest(): void {
   setAccessToken(null);
   disconnectSocket();
   stopSettingsSync();
+  // Drop cached queries: without this the next login — possibly a DIFFERENT
+  // user on this shared browser — renders the previous account's messages
+  // and server state before the refetch lands.
+  queryClient.clear();
   void leaveVoiceChannel();
   useSessionStore.setState({ user: null, accessToken: null, status: "guest" });
 }

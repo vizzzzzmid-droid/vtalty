@@ -47,7 +47,13 @@ export function MessageList({
     },
   });
 
-  const flat = (history.data?.pages ?? []).flatMap((page) => page.messages);
+  // React Query appends each older page to the END of `pages` (page 1 is the
+  // newest window, every `before:` page older than the last) while each page
+  // is internally ascending — so the flat list must read the pages BACKWARDS
+  // to render oldest-first with the newest message at the bottom.
+  const flat = [...(history.data?.pages ?? [])]
+    .reverse()
+    .flatMap((page) => page.messages);
   const usernames = members.map((member) => member.user.username);
   const byId = new Map(members.map((member) => [member.userId, member]));
 

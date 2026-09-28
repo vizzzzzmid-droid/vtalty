@@ -123,6 +123,38 @@ describe("stream audio element", () => {
   });
 });
 
+// Regression: StreamTile discarded the teardown functions returned by
+// attachStreamVideo/attachStreamAudio. Nothing was ever detached: the
+// LiveKit track kept references to dead DOM elements and the mono->stereo
+// centring graph leaked its nodes plus a muted keeper <audio> into
+// document.body for the rest of the session (once per watch cycle and once
+// per fullscreen toggle). The behavioral test is screen-teardown.test.tsx;
+// these pins keep the wiring obvious during refactors.
+describe("StreamTile teardown wiring", () => {
+  it("keeps every attach cleanup and invokes all of them", () => {
+    expect(tileSource).toMatch(/detachTileVideo = attachStreamVideo/);
+    expect(tileSource).toMatch(/detachOverlayVideo = attachStreamVideo/);
+    expect(tileSource).toMatch(/detachAudio = attachStreamAudio/);
+    expect(tileSource).toContain("detachTileVideo?.()");
+    expect(tileSource).toContain("detachOverlayVideo?.()");
+    expect(tileSource).toContain("detachAudio?.()");
+  });
+});
+
+// Regression: a WS reconnect announced the raw toggles instead of the
+// effective mic gate, so a deafened user (or a PTT key not held) told the
+// server a muted state they were not actually in.
+describe("reconnect announces the effective muted state", () => {
+  const socketSource = readFileSync(
+    resolve(process.cwd(), "src/ws/socket.ts"),
+    "utf8",
+  );
+  it("folds deafen and PTT into the announced muted", () => {
+    expect(socketSource).toContain("selfDeafened ||");
+    expect(socketSource).toContain("ptt && !voice.pttActive");
+  });
+});
+
 // Regression: screen-share/mic audio played in the LEFT ear only. A
 // ChannelMergerNode maps input N to output channel N, so a bare
 // `connect(merger)` lands a mono source on input 0 (left) with the right

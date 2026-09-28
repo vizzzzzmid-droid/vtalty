@@ -61,15 +61,24 @@ export function StreamTile({
       return undefined;
     }
     watchStream(sharerId);
+    // The attach helpers return teardown functions (track.detach + centring
+    // graph release). They MUST run on every cleanup: without them the
+    // LiveKit track keeps references to dead elements and the mono→stereo
+    // centring graph leaks its nodes plus its muted keeper <audio> into
+    // document.body for the rest of the session (every overlay toggle and
+    // every watch cycle would leak one graph).
+    let detachTileVideo: (() => void) | undefined;
+    let detachOverlayVideo: (() => void) | undefined;
+    let detachAudio: (() => void) | undefined;
     const attach = (): void => {
       if (videoRef.current !== null) {
-        attachStreamVideo(sharerId, videoRef.current);
+        detachTileVideo = attachStreamVideo(sharerId, videoRef.current);
       }
       if (overlayVideoRef.current !== null) {
-        attachStreamVideo(sharerId, overlayVideoRef.current);
+        detachOverlayVideo = attachStreamVideo(sharerId, overlayVideoRef.current);
       }
       if (audioRef.current !== null) {
-        attachStreamAudio(sharerId, audioRef.current);
+        detachAudio = attachStreamAudio(sharerId, audioRef.current);
       }
       setDegraded(isDegradedQuality(sharerQuality(sharerId)));
     };
@@ -77,6 +86,9 @@ export function StreamTile({
     const timer = setInterval(attach, 1000);
     return () => {
       clearInterval(timer);
+      detachTileVideo?.();
+      detachOverlayVideo?.();
+      detachAudio?.();
       unwatchStream(sharerId);
     };
   }, [watching, sharerId, fullscreen, self]);

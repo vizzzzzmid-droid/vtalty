@@ -87,16 +87,15 @@ function applyDeafenSubscriptions(deafened: boolean): void {
     return;
   }
   for (const participant of room.remoteParticipants.values()) {
+    // Microphone audio only: screen-share audio is tile-owned (opt-in via
+    // StreamTile, muted by its own element), so deafen must never subscribe
+    // or unsubscribe it — undeafen used to pull in every sharer's stream
+    // audio until the next TrackSubscribed event unsubscribed it again.
     for (const publication of participant.audioTrackPublications.values()) {
-      (publication as RemoteTrackPublication).setSubscribed(!deafened);
-    }
-    // Deafen also silences screen-share audio (never the video).
-    // String literal keeps livekit-client out of the initial chunk
-    // (value matches Track.Source.ScreenShareAudio, verified in types).
-    for (const publication of participant.trackPublications.values()) {
       if ((publication as { source?: unknown }).source === "screen_share_audio") {
-        (publication as RemoteTrackPublication).setSubscribed(!deafened);
+        continue;
       }
+      (publication as RemoteTrackPublication).setSubscribed(!deafened);
     }
   }
 }
@@ -388,45 +387,101 @@ export function currentVoiceChannel(): string | null {
   return snapshot().channelId;
 }
 
+/**
+ * Epoch of the in-flight join. Every joinVoiceChannel call increments it, so
+ * an older join can detect that a newer click superseded it and discard its
+ * room instead of landing a channel the user already left.
+ */
+let joinEpoch = 0;
+
+/** Discard a room a newer join superseded; the session state is not ours. */
+async function discardRoom(next: Room, mic: MicChain): Promise<void> {
+  detachAll(next);
+  if (room === next) {
+    room = null;
+  }
+  if (chain === mic) {
+    mic.cleanup();
+    chain = null;
+  }
+  try {
+    await next.disconnect();
+  } catch {
+    // Best effort; the newer join owns the session.
+  }
+}
+
 export async function joinVoiceChannel(channelId: string): Promise<void> {
   const s = snapshot();
-  if (
-    s.status === "connecting" ||
-    (s.status === "connected" && s.channelId === channelId)
-  ) {
+  if (s.status === "connected" && s.channelId === channelId) {
     return;
   }
+  // A duplicate click on the channel currently being joined collapses into
+  // that join (two rooms for one channel would double-publish the mic).
+  if (s.status === "connecting" && s.channelId === channelId) {
+    return;
+  }
+  const epoch = ++joinEpoch;
   if (room !== null) {
     await teardownRoom();
+    if (epoch !== joinEpoch) {
+      return;
+    }
   }
   s.set({ status: "connecting", channelId, error: null, speakingIds: [] });
   intentionalDisconnect = false;
   lastAnnounced = "";
   try {
     const invitation = await requestVoiceToken(channelId);
+    if (epoch !== joinEpoch) {
+      return;
+    }
     // Build the mic chain BEFORE connecting: device errors then fail fast
     // without a ghost join. Enhanced mode falls back to Standard when the
     // browser cannot do 48 kHz / AudioWorklet / WASM.
     const mic = await buildMicChainWithFallback();
+    if (epoch !== joinEpoch) {
+      mic.cleanup();
+      return;
+    }
     chain = mic;
     const sdk = await livekit();
+    if (epoch !== joinEpoch) {
+      mic.cleanup();
+      chain = null;
+      return;
+    }
     const next = new sdk.Room({ adaptiveStream: true, dynacast: true });
     room = next;
     attachHandlers(next, sdk);
     await next.connect(invitation.url, invitation.token);
+    // A newer join won while this one was connecting: drop this room without
+    // touching presence state (the newer join owns `room` and the store).
+    if (epoch !== joinEpoch) {
+      await discardRoom(next, mic);
+      return;
+    }
+    let published: LocalTrackPublication | null = null;
     try {
-      micPublication = await next.localParticipant.publishTrack(mic.track, {
+      published = await next.localParticipant.publishTrack(mic.track, {
         source: sdk.Track.Source.Microphone,
         ...MIC_PUBLISH_OPTIONS,
       });
     } catch {
-      // Listen-only grants (or revoked speak): stay connected, listen only.
-      snapshot().set({ error: "Connected listen-only: publishing was refused." });
+      if (epoch === joinEpoch) {
+        // Listen-only grants (or revoked speak): stay connected, listen only.
+        snapshot().set({ error: "Connected listen-only: publishing was refused." });
+      }
     }
     const outputId = useVoiceSettings.getState().outputDeviceId;
     if (outputId !== null) {
       await next.switchActiveDevice("audiooutput", outputId).catch(() => false);
     }
+    if (epoch !== joinEpoch) {
+      await discardRoom(next, mic);
+      return;
+    }
+    micPublication = published;
     applyAllVolumes();
     applyDeafenSubscriptions(snapshot().selfDeafened);
     applyMicGate();
@@ -436,6 +491,11 @@ export async function joinVoiceChannel(channelId: string): Promise<void> {
     startQualityTimer();
     voiceSounds.join();
   } catch (err) {
+    if (epoch !== joinEpoch) {
+      // Superseded mid-flight: the newer join owns the state, and our error
+      // would clobber the channel it is connecting to.
+      return;
+    }
     await teardownRoom();
     snapshot().set({ status: "failed", channelId, error: describeJoinError(err) });
   }

@@ -11,6 +11,7 @@ import { queryClient } from "../api/queryClient.js";
 import { requestWsTicket, type HistoryPage } from "../api/resources.js";
 import { notifyForMessage } from "./notify.js";
 import { usePresenceStore } from "../store/presence.js";
+import { useVoiceSettings } from "../voice/settings.js";
 import { useVoiceConnection } from "../voice/store.js";
 
 let socket: WebSocket | null = null;
@@ -107,14 +108,16 @@ function appendMessage(
     return old;
   }
   const pages = [...old.pages];
-  const last = pages[pages.length - 1];
-  if (last === undefined) {
+  // pages[0] is the newest page (see MessageList's reverse), so a live
+  // message lands at the bottom of the rendered list.
+  const newest = pages[0];
+  if (newest === undefined) {
     return old;
   }
-  if (last.messages.some((entry) => entry.id === message.id)) {
+  if (newest.messages.some((entry) => entry.id === message.id)) {
     return old;
   }
-  pages[pages.length - 1] = { ...last, messages: [...last.messages, message] };
+  pages[0] = { ...newest, messages: [...newest.messages, message] };
   return { ...old, pages };
 }
 
@@ -176,6 +179,13 @@ async function openSocket(): Promise<void> {
   if (!running) {
     return;
   }
+  // Sequence numbers are per-CONNECTION (the server counts from 0 on every
+  // handshake), so the counter from a previous socket — even another user's
+  // session on this tab — is meaningless here. Keeping it would make our
+  // `client.hello` claim events this connection never delivered, which would
+  // silently skip the replay the moment the server implements gap detection
+  // (the contract `lastSeq` exists for).
+  lastSeq = 0;
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
   const url = `${protocol}://${window.location.host}${WS_PATH}?ticket=${encodeURIComponent(ticket)}`;
   const next = new WebSocket(url);
@@ -188,10 +198,21 @@ async function openSocket(): Promise<void> {
     void queryClient.invalidateQueries({ queryKey: ["state"] });
     void queryClient.invalidateQueries({ queryKey: ["servers"] });
     void queryClient.invalidateQueries({ queryKey: ["unread"] });
+    // The open channel's history too: frames lost during the outage never
+    // reached the ["messages"] cache, so the list would render stale until
+    // the user switched channels and back.
+    void queryClient.invalidateQueries({ queryKey: ["messages"] });
     // Re-announce mic state: flags changed during the outage never arrived.
+    // The announced muted must match the effective gate (room.ts
+    // isAudible()): deafen implies mute, and a PTT key that is not held
+    // mutes too. Sending the raw toggles would publish a state the client
+    // is not actually in.
     const voice = useVoiceConnection.getState();
     if (voice.status === "connected" && voice.channelId !== null) {
-      sendVoiceFlags(voice.channelId, voice.selfMuted, voice.selfDeafened);
+      const ptt = useVoiceSettings.getState().pttEnabled;
+      const effectiveMuted =
+        voice.selfMuted || voice.selfDeafened || (ptt && !voice.pttActive);
+      sendVoiceFlags(voice.channelId, effectiveMuted, voice.selfDeafened);
     }
   };
   next.onmessage = (msg) => {
@@ -211,16 +232,18 @@ async function openSocket(): Promise<void> {
 }
 
 /** Connect the gateway (call after login/boot; uses the stored session). */
-export function connectSocket(): void {  running = true;
+export function connectSocket(): void {
+  running = true;
   attempts = 0;
   if (reconnectTimer !== null) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
   if (socket !== null) {
-    const old = socket;
-    socket = null;
-    old.close();
+    // A live socket survives a token rotation: the access JWT refreshes every
+    // 900 s and a mid-session refresh must not drop a working session. Only
+    // a cold start (or a re-login after disconnectSocket) opens one here.
+    return;
   }
   void openSocket();
 }
