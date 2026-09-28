@@ -16,6 +16,8 @@ interface TestDesktopBridge {
   onPttKey: (callback: (active: boolean) => void) => () => void;
   onToggleMute: (callback: () => void) => () => void;
   onNotificationClick: (callback: (channelId: string) => void) => () => void;
+  getSetting: (key: string) => Promise<unknown>;
+  setSetting: (key: string, value: unknown) => Promise<boolean>;
 }
 
 interface Window {

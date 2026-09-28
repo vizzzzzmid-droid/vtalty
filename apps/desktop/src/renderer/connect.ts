@@ -49,6 +49,15 @@ async function currentPttKeycode(): Promise<number> {
   return typeof value === "number" && Number.isInteger(value) ? value : 41;
 }
 
+async function currentMuteAccelerator(): Promise<string> {
+  const enabled = await getSetting("globalMuteShortcut");
+  if (enabled !== true) {
+    return "";
+  }
+  const value = await getSetting("globalMuteAccelerator");
+  return typeof value === "string" ? value.trim() : "";
+}
+
 async function refreshPttLabel(): Promise<void> {
   const label = document.getElementById("ptt-key-label");
   if (label !== null) {
@@ -67,7 +76,7 @@ function armPttCapture(): void {
     hint.textContent = "Listening… press a key (Esc cancels).";
   }
   button.disabled = true;
-  const onKey = (event: KeyboardEvent): void => {
+  const onKey = async (event: KeyboardEvent): Promise<void> => {
     event.preventDefault();
     event.stopPropagation();
     window.removeEventListener("keydown", onKey, true);
@@ -81,6 +90,14 @@ function armPttCapture(): void {
     const result = validatePttDomCode(event.code);
     if ("error" in result) {
       keysError(result.error);
+      return;
+    }
+    // The accelerator must not share its main key with the new PTT key —
+    // check against the PROSPECTIVE keycode, otherwise the conflict is only
+    // reported from the accelerator side.
+    const accelerator = await currentMuteAccelerator();
+    if (accelerator.length > 0 && acceleratorConflictsPtt(accelerator, result.keycode)) {
+      keysError("That key is already used by the mute shortcut.");
       return;
     }
     void setSetting("globalPttKeycode", result.keycode).then(() => {
@@ -99,8 +116,7 @@ async function initKeySettings(): Promise<void> {
   }
   const accInput = document.getElementById("opt-mute-acc");
   if (accInput instanceof HTMLInputElement) {
-    const current = await getSetting("globalMuteAccelerator");
-    accInput.value = typeof current === "string" ? current : "";
+    accInput.value = await currentMuteAccelerator();
     const save = document.getElementById("mute-save");
     if (save instanceof HTMLButtonElement) {
       save.addEventListener("click", () => {
@@ -205,6 +221,7 @@ async function init(): Promise<void> {
   bindCheckbox("opt-start-min", "startMinimized");
   bindCheckbox("opt-notify", "notificationsEnabled");
   bindCheckbox("opt-ptt", "globalPttEnabled");
+  bindCheckbox("opt-mute", "globalMuteShortcut");
   await initKeySettings();
   await renderRecent();
 }

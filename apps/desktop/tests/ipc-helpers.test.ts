@@ -23,6 +23,7 @@ describe("isWritableSettingKey", () => {
       "notificationsEnabled",
       "globalPttEnabled",
       "globalPttKeycode",
+      "globalMuteShortcut",
       "globalMuteAccelerator",
     ]) {
       expect(isWritableSettingKey(key)).toBe(true);
@@ -65,6 +66,12 @@ describe("applySettingsPatch", () => {
     expect(applySettingsPatch(base, { globalPttKeycode: 65536 }).changed).toBe(false);
     expect(applySettingsPatch(base, { globalPttKeycode: 1.5 }).changed).toBe(false);
     expect(applySettingsPatch(base, { globalPttKeycode: "30" }).changed).toBe(false);
+  });
+
+  it("applies the globalMuteShortcut toggle", () => {
+    const { next, changed } = applySettingsPatch(base, { globalMuteShortcut: false });
+    expect(changed).toBe(true);
+    expect(next.globalMuteShortcut).toBe(false);
   });
 
   it("validates the mute accelerator", () => {

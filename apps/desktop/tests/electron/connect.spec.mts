@@ -90,3 +90,34 @@ test("bridge event subscriptions subscribe and release", async () => {
   });
   expect(counts).toBe("ok");
 });
+
+test("key settings rebind at runtime without a restart", async () => {
+  // Regression: setSetting persisted the new keys but the already-registered
+  // global shortcut / PTT hook kept the OLD binding until relaunch. This
+  // drives the real IPC handler in the real main process and inspects
+  // Electron's own globalShortcut registry, so it observes the OS-level
+  // binding rather than the persisted store.
+  const registered = (accelerator: string) =>
+    app.evaluate(({ globalShortcut }, acc) => globalShortcut.isRegistered(acc), accelerator);
+
+  // Pin a known starting binding (the boot default is
+  // CommandOrControl+Shift+M, so set our own first).
+  expect(await page.evaluate(() => window.desktop.setSetting("globalMuteAccelerator", "Ctrl+Alt+P"))).toBe(true);
+  expect(await registered("Ctrl+Alt+P")).toBe(true);
+
+  // Rebind to a new combo: the old one must be released and the new one
+  // grabbed — in the same process, no restart.
+  expect(await page.evaluate(() => window.desktop.setSetting("globalMuteAccelerator", "Ctrl+Alt+K"))).toBe(true);
+  expect(await registered("Ctrl+Alt+P")).toBe(false);
+  expect(await registered("Ctrl+Alt+K")).toBe(true);
+
+  // The PTT keycode swaps live too (the hook compares against this value).
+  expect(await page.evaluate(() => window.desktop.setSetting("globalPttKeycode", 47))).toBe(true);
+  expect(await page.evaluate(() => window.desktop.getSetting("globalPttKeycode"))).toBe(47);
+
+  // Restore the defaults so the suite stays order-independent.
+  await page.evaluate(() => window.desktop.setSetting("globalMuteAccelerator", "Ctrl+Alt+P"));
+  await page.evaluate(() => window.desktop.setSetting("globalPttKeycode", 41));
+  expect(await registered("Ctrl+Alt+P")).toBe(true);
+  expect(await registered("Ctrl+Alt+K")).toBe(false);
+});

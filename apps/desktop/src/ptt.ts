@@ -1,7 +1,7 @@
 import { globalShortcut } from "electron";
 import type { BrowserWindow } from "electron";
 import { IPC_CHANNELS } from "./shared.js";
-import { loadSettings } from "./store.js";
+import { loadSettings, type DesktopSettings } from "./store.js";
 import { DEFAULT_MUTE_ACCELERATOR, matchesPttKey, validateAccelerator } from "./keymap.js";
 
 export interface PttCapabilities {
@@ -11,6 +11,16 @@ export interface PttCapabilities {
 
 let hookActive = false;
 let stopHook: (() => void) | null = null;
+/**
+ * The keycode the running hook compares every keystroke against. Updated by
+ * rebindGlobalKeys() without restarting the OS hook, so a settings change is
+ * live for the very next key event.
+ */
+let boundPttKeycode = 41;
+/** The accelerator currently registered with the OS ("" = none bound). */
+let registeredAccelerator = "";
+/** The window the current shortcut fires into (set on first registration). */
+let shortcutWindow: BrowserWindow | null = null;
 
 type UiohookModule = typeof import("uiohook-napi");
 
@@ -41,6 +51,7 @@ export async function startGlobalPtt(
   if (!settings.globalPttEnabled) {
     return { available: false, reason: "disabled in settings" };
   }
+  boundPttKeycode = settings.globalPttKeycode;
   const hook = await loadHook();
   if (hook === null) {
     return {
@@ -48,18 +59,19 @@ export async function startGlobalPtt(
       reason: "global key hook unavailable on this system (Wayland/macOS permissions?) — in-app PTT still works while the tab is focused",
     };
   }
-  const wanted = settings.globalPttKeycode;
   // Privacy: the hook sees EVERY keystroke system-wide; the handlers below
   // compare only the bound keycode and never log, store, or forward anything
   // else. No keylogging — by construction, and asserted in review.
+  // `boundPttKeycode` is read per event (never captured in a closure) so a
+  // runtime rebind takes effect without restarting the hook.
   const down = (event: { keycode?: unknown }): void => {
-    if (matchesPttKey(event.keycode, wanted)) {
+    if (matchesPttKey(event.keycode, boundPttKeycode)) {
       onState(true);
       window.webContents.send(IPC_CHANNELS.pttKey, { active: true });
     }
   };
   const up = (event: { keycode?: unknown }): void => {
-    if (matchesPttKey(event.keycode, wanted)) {
+    if (matchesPttKey(event.keycode, boundPttKeycode)) {
       onState(false);
       window.webContents.send(IPC_CHANNELS.pttKey, { active: false });
     }
@@ -97,32 +109,113 @@ export function isGlobalPttActive(): boolean {
 }
 
 /**
+ * Resolve the accelerator a settings value should bind right now: null when
+ * the feature is disabled, the stored value when it parses, the default
+ * otherwise. Pure, unit-tested.
+ *
+ * A hand-edited config can hold anything (the store schema is permissive on
+ * purpose); this is the last validation before touching the OS.
+ */
+export function resolveMuteAccelerator(settings: {
+  globalMuteShortcut: boolean;
+  globalMuteAccelerator: string;
+}): string | null {
+  if (!settings.globalMuteShortcut) {
+    return null;
+  }
+  return validateAccelerator(settings.globalMuteAccelerator) === null
+    ? settings.globalMuteAccelerator
+    : DEFAULT_MUTE_ACCELERATOR;
+}
+
+/**
  * Global toggle-mute via Electron's own shortcut (press-only is fine here).
- * The accelerator comes from settings; an invalid stored value falls back
- * to the default (validated again here so a hand-edited config cannot
- * register a bare typing key globally).
+ *
+ * Idempotent rebinding: the OLD accelerator is ALWAYS unregistered before the
+ * new one is registered — even when the two are equal, because register() on
+ * an accelerator this process already owns is a silent no-op that would keep
+ * a stale callback bound. This unregister-then-register is what makes a
+ * settings change apply without a restart (the previous code only ever
+ * called register(), so the old key stayed grabbed while the new one was
+ * ignored — changes only appeared after relaunch).
  */
 export function registerMuteShortcut(window: BrowserWindow): boolean {
-  const settings = loadSettings();
-  if (!settings.globalMuteShortcut) {
+  shortcutWindow = window;
+  const accelerator = resolveMuteAccelerator(loadSettings());
+  unregisterMuteShortcut();
+  if (accelerator === null) {
     return false;
   }
-  const accelerator =
-    validateAccelerator(settings.globalMuteAccelerator) === null
-      ? settings.globalMuteAccelerator
-      : DEFAULT_MUTE_ACCELERATOR;
   try {
     const ok = globalShortcut.register(accelerator, () => {
-      if (!window.isDestroyed()) {
-        window.webContents.send(IPC_CHANNELS.toggleMute);
+      const target = shortcutWindow;
+      if (target !== null && !target.isDestroyed()) {
+        target.webContents.send(IPC_CHANNELS.toggleMute);
       }
     });
+    if (ok) {
+      registeredAccelerator = accelerator;
+    }
     return ok;
   } catch {
     return false;
   }
 }
 
+export function unregisterMuteShortcut(): void {
+  if (registeredAccelerator.length > 0) {
+    globalShortcut.unregister(registeredAccelerator);
+    registeredAccelerator = "";
+  }
+}
+
+export function getRegisteredMuteAccelerator(): string {
+  return registeredAccelerator;
+}
+
 export function unregisterShortcuts(): void {
+  registeredAccelerator = "";
   globalShortcut.unregisterAll();
+}
+
+/**
+ * Apply a settings change to the live global key bindings without a restart.
+ * Pure decisions first (which subsystems are affected), then the OS calls.
+ *
+ *   globalMuteShortcut / globalMuteAccelerator -> rebind the accelerator
+ *   globalPttEnabled                              -> start or stop the OS hook
+ *   globalPttKeycode                             -> hot-swap the compared key
+ *
+ * Returns what the PTT hook now reports, so the caller can surface a
+ * degradation (e.g. the hook went unavailable) to the user.
+ */
+export async function rebindGlobalKeys(
+  window: BrowserWindow,
+  before: DesktopSettings,
+  after: DesktopSettings,
+  onState: (active: boolean) => void,
+): Promise<PttCapabilities> {
+  if (
+    before.globalMuteShortcut !== after.globalMuteShortcut ||
+    before.globalMuteAccelerator !== after.globalMuteAccelerator
+  ) {
+    registerMuteShortcut(window);
+  }
+  if (before.globalPttKeycode !== after.globalPttKeycode) {
+    boundPttKeycode = after.globalPttKeycode;
+  }
+  if (!after.globalPttEnabled) {
+    stopGlobalPtt();
+    return { available: false, reason: "disabled in settings" };
+  }
+  if (before.globalPttEnabled !== after.globalPttEnabled || !hookActive) {
+    // Enable path needs a hook start; the keycode swap above is picked up by
+    // the running listeners otherwise.
+    return startGlobalPtt(window, onState);
+  }
+  return { available: true, reason: null };
+}
+
+export function getBoundPttKeycode(): number {
+  return boundPttKeycode;
 }

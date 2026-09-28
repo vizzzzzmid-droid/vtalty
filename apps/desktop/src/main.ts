@@ -408,6 +408,13 @@ async function bootstrap(): Promise<void> {
   app.on("activate", () => {
     if (mainWindow === null || mainWindow.isDestroyed()) {
       createWindow(false);
+      // The accelerator is process-global and outlived the destroyed window;
+      // rebind it so toggle-mute posts to the new webContents instead of a
+      // dead one. (DevTools windows never reach here — they are not created
+      // through this path, so the shortcut target stays the main window.)
+      if (mainWindow !== null && !mainWindow.isDestroyed()) {
+        registerMuteShortcut(mainWindow);
+      }
     } else {
       mainWindow.show();
     }

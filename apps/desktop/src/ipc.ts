@@ -16,6 +16,7 @@ import {
 import { resolveScreenPick } from "./picker.js";
 import { loadSettings, rememberServer, saveSettings, type DesktopSettings } from "./store.js";
 import { validateScreenPickResult } from "./picker.js";
+import { rebindGlobalKeys } from "./ptt.js";
 import { validateAccelerator } from "./keymap.js";
 
 export interface IpcContext {
@@ -71,6 +72,7 @@ export const WRITABLE_SETTINGS = [
   "notificationsEnabled",
   "globalPttEnabled",
   "globalPttKeycode",
+  "globalMuteShortcut",
   "globalMuteAccelerator",
 ] as const;
 
@@ -109,7 +111,7 @@ export function applySettingsPatch(
   const record = body as Record<string, unknown>;
   const next = { ...settings };
   let changed = false;
-  for (const key of ["minimizeToTray", "startMinimized", "notificationsEnabled", "globalPttEnabled"] as const) {
+  for (const key of ["minimizeToTray", "startMinimized", "notificationsEnabled", "globalPttEnabled", "globalMuteShortcut"] as const) {
     if (typeof record[key] === "boolean") {
       next[key] = record[key];
       changed = true;
@@ -351,9 +353,22 @@ export function registerIpc(context: IpcContext): void {
     if (url === undefined || !isConnectSender(url)) {
       return false;
     }
-    const { next, changed } = applySettingsPatch(loadSettings(), body);
+    const before = loadSettings();
+    const { next, changed } = applySettingsPatch(before, body);
     if (changed) {
       saveSettings(next);
+    }
+    // Runtime rebind: without this the already-registered global shortcut /
+    // PTT hook keeps the OLD keys until the app is restarted — the store
+    // alone never touches the OS-level bindings. The old accelerator is
+    // unregistered inside registerMuteShortcut().
+    if (changed) {
+      const window = context.window();
+      if (window !== null && !window.isDestroyed()) {
+        void rebindGlobalKeys(window, before, next, () => undefined).catch(
+          () => undefined,
+        );
+      }
     }
     return changed;
   });
